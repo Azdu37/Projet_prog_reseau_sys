@@ -1,0 +1,152 @@
+{
+
+    "P": {
+      "stats": {
+        "hp": 55,
+        "size": 0.5,
+        "attack": 4,
+        "armor": 0,
+        "pierceArmor": 0,
+        "range": 0,
+        "lineOfSight": 4,
+        "speed": 1,
+        "buildTimeSeconds": 22,
+        "reloadTimeSeconds": 3,
+        "attackDelay": 0
+      },
+      "attacks": {
+        "baseMelee" : 4,
+        "eagleWarriors" : 1,
+        "cavalry" : 22,
+        "camelRiders" : 18,
+        "mamelukes" : 11,
+        "elephants" : 25,
+        "ships" : 16,
+        "fishingShips" : 16,
+        "standardBuildings" : 1
+      },
+      "armors": {
+        "baseMelee": 0,
+        "basePierce": 0,
+        "infantry": 0,
+        "spearmen": 0,
+        "ignoreArmor": 0
+      }
+    },
+    "K": {
+      "stats": {
+        "hp": 100,
+        "size": 0.75,
+        "attack": 10,
+        "armor": 2,
+        "pierceArmor": 2,
+        "range": 0,
+        "lineOfSight": 4,
+        "speed": 1.35,
+        "buildTimeSeconds": 30,
+        "reloadTimeSeconds": 1.8,
+        "attackDelay": 0
+      },
+      "attacks": {
+        "baseMelee" : 10,
+        "archers" : 0,
+        "standardBuildings" : 0,
+        "allBuildings" : 0,
+        "skirmishers" : 0,
+        "mountedUnitsResistance" : -3
+      },
+      "armors": {
+        "baseMelee" : 2,
+        "basePierce" : 2,
+        "cavalry" : 0,
+        "ignoreArmor" : 0
+      }
+    },
+    "C": {
+      "stats": {
+        "hp": 35,
+        "size": 0.5,
+        "attack": 5,
+        "armor": 0,
+        "pierceArmor": 0,
+        "range": 7,
+        "lineOfSight": 9,
+        "speed": 0.96,
+        "buildTimeSeconds": 27,
+        "reloadTimeSeconds": 2,
+        "attackDelay": 0.35
+      },
+      "attacks": {
+        "basePierce" : 5,
+        "spearmen" : 3,
+        "rams" : 0,
+        "standardBuildings" : 0,
+        "stoneDefense" : 0
+      },
+      "armors": {
+        "baseMelee" : 0,
+        "basePierce" : 0,
+        "archers" : 0,
+        "ignoreArmor" : 0
+      }
+    },
+    "L": {
+      "stats": {
+        "hp": 60,
+        "size": 0.5,
+        "attack": 9,
+        "armor": 2,
+        "pierceArmor": 1,
+        "range": 0,
+        "lineOfSight": 4,
+        "speed": 0.9,
+        "buildTimeSeconds": 30,
+        "reloadTimeSeconds": 2,
+        "attackDelay": 0
+      },
+      "attacks": {
+        "baseMelee" : 9,
+        "cavalry" : 0,
+        "standardBuildings" : 3,
+        "eagleWarriors" : 6,
+        "camelRiders" : 0
+      },
+      "armors": {
+        "baseMelee" : 1,
+        "basePierce" : 1,
+        "infantry" : 0,
+        "ignoreArmor" : 0
+      }
+    },
+    "S": {
+    "stats": {
+      "hp": 35,
+      "size": 0.5,
+      "attack": 3,
+      "armor": 0,
+      "pierceArmor": 4,
+      "range": 7,
+      "range_min" : 1,
+      "lineOfSight": 9,
+      "speed": 0.96,
+      "buildTimeSeconds": 22,
+      "reloadTimeSeconds": 3,
+      "attackDelay": 0.51
+    },
+    "attacks": {
+      "basePierce": 3,
+      "archers": 4,
+      "spearmen": 4,
+      "cavalryArchers": 2
+    },
+    "armors": {
+      "baseMelee": 0,
+      "basePierce": 4,
+      "archers": 0,
+      "ignoreArmor": 0,
+      "skirmishers" : 0
+    }
+  }
+
+  }
+
