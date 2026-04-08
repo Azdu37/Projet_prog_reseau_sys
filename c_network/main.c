@@ -47,6 +47,7 @@ static void broadcast_dirty_units(GameState *state)
 
         /* N'envoie que les unités qu'on possède ET qui ont changé */
         if (u->dirty && u->owner_peer == state->my_peer_id) {
+            printf("[main] Envoi UDP de l'unité %d (dirty=1)...\n", u->id);
             net_broadcast_state_update(u, state->my_peer_id);
             u->dirty = 0;   /* acquitté localement */
         }

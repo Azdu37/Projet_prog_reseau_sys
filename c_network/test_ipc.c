@@ -65,7 +65,7 @@ int main(void)
         .team       = 1,
         .owner_peer = 1,   /* appartient à PC B en V2 */
         .alive      = 1,
-        .dirty      = 0,
+        .dirty      = 1,   /* On le met à 1 pour que le PC 2 puisse l'envoyer ! */
         .x          = 10.0f,
         .y          = 8.0f,
         .hp         = 80,
