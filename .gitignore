@@ -18,3 +18,8 @@ game_report_*.html
 lanchester_report_*.html
 lanchester_plot_report.html
 tournament_report.html
+
+# C — fichiers générés par le Makefile
+c_network/*.o
+c_network/c_net
+c_network/test_ipc
