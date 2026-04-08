@@ -28,7 +28,7 @@ AI_REGISTRY = {
     "strategus10" : Strategus10,
 
 }
-""""coordia": CoordIA,
+""""
     "coordia1": CoordIA1,
     "braindead": Brain_DEAD,
     "majordaft": MajorDaft,
