@@ -484,20 +484,9 @@ class Engine:
         # 1027.9418369857085 fps pour le no terminal
         return None
 
-""" peut être utile plus tard
-            return {
-                'turn': self.current_turn,
-                'scenario': str(self.scenario_name),
-                'ia1': str(self.ia1.name),
-                'ia2': str(self.ia2.name),
-                'units_ia1': len([u for u in self.units if u.team == 'R' and u.is_alive]),
-                'units_ia2': len([u for u in self.units if u.team == 'B' and u.is_alive]),
-                'real_tps': self.real_tps,
-                'time_from_start': time.time() - self.star_execution_time,
-                'winner_ia': str(self.winner.name) if self.winner else "draw",
-                'winner_team': str(self.winner.team) if self.winner else None
-            }
-"""
+#peut être utile plus tard
+ #           return {'turn': self.current_turn,'scenario': str(self.scenario_name),'ia1': str(self.ia1.name), 'ia2': str(self.ia2.name), 'units_ia1': len([u for u in self.units if u.team == 'R' and u.is_alive]),'units_ia2': len([u for u in self.units if u.team == 'B' and u.is_alive]),'real_tps': self.real_tps,'time_from_start': time.time() - self.star_execution_time,'winner_ia': str(self.winner.name) if self.winner else "draw",'winner_team': str(self.winner.team) if self.winner else None }
+
         
 
     def pause(self):
