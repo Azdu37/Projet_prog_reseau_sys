@@ -64,11 +64,13 @@ def randomize_order(units):
 
 
 class Engine:
-    def __init__(self, scenario, ia1, ia2, view_type):
+    def __init__(self, scenario, ia1, ia2, view_type, is_distributed=False, local_team=None):
 
         self.scenario_name = scenario
-        self.ia1 = fix_string(ia1)
-        self.ia2 = fix_string(ia2)
+        self.is_distributed = is_distributed
+        self.local_team = local_team
+        self.ia1_name = fix_string(ia1)
+        self.ia2_name = fix_string(ia2)
 
         self.game_map = None
         self.units = []
@@ -122,14 +124,34 @@ class Engine:
 
 
     def initialize_ai(self):
-        """Initialise les deux IA"""
-        if self.ia1 not in AI_REGISTRY:
-            raise ValueError(f"IA '{self.ia1}' non reconnue.")
-        if self.ia2 not in AI_REGISTRY:
-            raise ValueError(f"IA '{self.ia2}' non reconnue.")  
-        
-        self.ia1 = AI_REGISTRY[self.ia1]("R", self.game_map)
-        self.ia2 = AI_REGISTRY[self.ia2]("B", self.game_map)
+        """Initialise les deux IA (ou seulement la locale en mode réparti)"""
+        if self.is_distributed:
+            print(f"Mode réparti actif. Équipe locale : {self.local_team}")
+            
+            # Initialisation de l'IA locale
+            if self.local_team == 'R':
+                if self.ia1_name not in AI_REGISTRY:
+                    raise ValueError(f"IA '{self.ia1_name}' non reconnue.")
+                self.ia1 = AI_REGISTRY[self.ia1_name]("R", self.game_map)
+                # On utilise un "void" pour l'équipe distante (sera pilotée par le réseau)
+                from ia.void import void
+                self.ia2 = void("B", self.game_map)
+            elif self.local_team == 'B':
+                if self.ia2_name not in AI_REGISTRY:
+                    raise ValueError(f"IA '{self.ia2_name}' non reconnue.")
+                self.ia2 = AI_REGISTRY[self.ia2_name]("B", self.game_map)
+                from ia.void import void
+                self.ia1 = void("R", self.game_map)
+            else:
+                raise ValueError(f"Équipe locale '{self.local_team}' invalide en mode réparti.")
+        else:
+            if self.ia1_name not in AI_REGISTRY:
+                raise ValueError(f"IA '{self.ia1_name}' non reconnue.")
+            if self.ia2_name not in AI_REGISTRY:
+                raise ValueError(f"IA '{self.ia2_name}' non reconnue.")  
+            
+            self.ia1 = AI_REGISTRY[self.ia1_name]("R", self.game_map)
+            self.ia2 = AI_REGISTRY[self.ia2_name]("B", self.game_map)
 
         self.ia1.initialize()
         self.ia2.initialize()
@@ -320,7 +342,7 @@ class Engine:
                 print(f"[LOAD] Loading saved battle from: {name}_save")
                 print(f"      ias: {ia1} vs {ia2}")
                 view_type = 2
-                engine = Engine(name, ia1, ia2, view_type)
+                engine = Engine(name, ia1, ia2, view_type, is_distributed=self.is_distributed, local_team=self.local_team)
                 engine.start()
         pass
 
@@ -335,10 +357,12 @@ class Engine:
                 continue
             if unit.team == 'R':
                 red_alive += 1
-                self.ia1.play_turn(unit, self.current_turn)
+                if not self.is_distributed or self.local_team == 'R':
+                    self.ia1.play_turn(unit, self.current_turn)
             elif unit.team == 'B':
                 blue_alive += 1
-                self.ia2.play_turn(unit, self.current_turn)
+                if not self.is_distributed or self.local_team == 'B':
+                    self.ia2.play_turn(unit, self.current_turn)
 
         # Enregistre l'historique pour Lanchester (tous les 10 tours pour ne pas trop alourdir)
         if "lanchester" in self.scenario_name.lower() and self.current_turn % 10 == 0:
@@ -396,7 +420,7 @@ class Engine:
                 print(f"[LOAD] Loading saved battle from: {name}_save")
                 print(f"      ias: {ia1} vs {ia2}")
                 view_type = 2
-                engine = Engine(name, ia1, ia2, view_type)
+                engine = Engine(name, ia1, ia2, view_type, is_distributed=self.is_distributed, local_team=self.local_team)
                 engine.start()
 
             if a["increase_speed"]:
