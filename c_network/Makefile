@@ -14,18 +14,22 @@ TARGET = c_net
 # Cibles
 # ─────────────────────────────────────────────
 
-all: $(TARGET)
+all: $(TARGET) test_ipc
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 	@echo "✓ Compilé : ./$(TARGET)"
+
+test_ipc: test_ipc.o ipc.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "✓ Compilé : ./test_ipc"
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Nettoyage
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(OBJS) test_ipc.o $(TARGET) test_ipc
 	@echo "✓ Nettoyé"
 
 # Nettoyage des ressources IPC zombies (si le process a crashé)
