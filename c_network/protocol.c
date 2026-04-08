@@ -1,0 +1,1 @@
+// Protocoles de jeu (propriété réseau, etc.)
