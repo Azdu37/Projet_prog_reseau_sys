@@ -19,9 +19,9 @@ int main(void)
 {
     printf("=== Test IPC V1 ===\n\n");
 
-    /* ── Création de la shm (mode créateur) ── */
-    if (ipc_init(SHM_NAME, SEM_WRITE_NAME, SEM_READ_NAME, 1) < 0) {
-        fprintf(stderr, "Échec ipc_init\n");
+    /* ── Ouverture de la shm (mode client) ── */
+    if (ipc_init(SHM_NAME, SEM_WRITE_NAME, SEM_READ_NAME, 0) < 0) {
+        fprintf(stderr, "Échec ipc_init. Assurez-vous d'avoir lancé ./c_net d'abord !\n");
         return 1;
     }
 

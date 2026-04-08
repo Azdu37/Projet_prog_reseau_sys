@@ -74,7 +74,7 @@ int main(int argc, char *argv[])
      * create=0 : on suppose que Python a déjà créé la shm.
      * create=1 : si on veut tester sans Python, mettre 1.
      */
-    if (ipc_init(SHM_NAME, SEM_WRITE_NAME, SEM_READ_NAME, 0) < 0) {
+    if (ipc_init(SHM_NAME, SEM_WRITE_NAME, SEM_READ_NAME, 1) < 0) {
         fprintf(stderr, "[main] Erreur IPC (la shm Python est-elle lancée ?)\n");
         return 1;
     }
