@@ -24,6 +24,9 @@ class Unit:
         self.position = position  # (x,y)
         self.destination = None
         self.team = team
+        # Ownership réseau (défini par le moteur en mode réparti)
+        self.is_local = False  # True si l'unité est pilotée localement
+        self.network_owner = None  # Optionnel: identifiant/équipe propriétaire
         self.squad = []
         self.squad.append(self)
         self.get_hit = 0
