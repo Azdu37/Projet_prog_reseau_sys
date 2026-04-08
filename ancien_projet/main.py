@@ -12,6 +12,9 @@ from battle.scenario import Scenario
 from ia.registry import AI_REGISTRY
 global tps
 
+# Ensure relative data paths resolve from the project directory.
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 if not os.path.exists("data/scenario"):
     os.mkdir("data/scenario")
 if not os.path.exists("data/lanchester"):
@@ -112,9 +115,6 @@ class BattleCLI:
         if len(sys.argv) < 2:
             help()
             return
-
-        else:
-            sys.argv.pop(0)  # Retire le nom du script
 
         if sys.argv[1] == "run":
             scenario_path = f"data/scenario/{sys.argv[2]}.txt"

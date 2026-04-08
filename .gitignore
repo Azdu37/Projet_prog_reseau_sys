@@ -1,6 +1,20 @@
-# PyCharm
-.idea
+# IDE
+.idea/
+.vscode/
 
-# Python cache
-__pycache__
-.pyc
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Generated reports
+game_report_*.html
+lanchester_report_*.html
+lanchester_plot_report.html
+tournament_report.html
