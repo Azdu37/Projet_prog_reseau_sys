@@ -69,6 +69,7 @@ class Engine:
         self.scenario_name = scenario
         self.is_distributed = is_distributed
         self.local_team = local_team
+        self.observer_mode = bool(is_distributed and (local_team is None))
         self.ia1_name = fix_string(ia1)
         self.ia2_name = fix_string(ia2)
 
@@ -111,9 +112,17 @@ class Engine:
 
     def initialize_units(self):
         """charge la liste d'unite"""
-        for (x,y) in self.game_map.map:
-            self.game_map.get_unit(x,y).direction = (0,0)
-            self.units.append(self.game_map.get_unit(x,y))
+        for (x, y) in self.game_map.map:
+            u = self.game_map.get_unit(x, y)
+            u.direction = (0, 0)
+            # Définition du propriétaire réseau local
+            if self.is_distributed:
+                u.is_local = (self.local_team is not None and u.team == self.local_team)
+                u.network_owner = self.local_team if u.is_local else (('R' if u.team == 'R' else 'B') if self.local_team is not None else None)
+            else:
+                u.is_local = True
+                u.network_owner = u.team
+            self.units.append(u)
 
     def load_scenario(self):
         """Charge le scénario depuis le fichier"""
@@ -127,21 +136,23 @@ class Engine:
         """Initialise les deux IA (ou seulement la locale en mode réparti)"""
         if self.is_distributed:
             print(f"Mode réparti actif. Équipe locale : {self.local_team}")
-            
-            # Initialisation de l'IA locale
-            if self.local_team == 'R':
+            # Mode observateur: aucune IA locale
+            if self.local_team is None:
+                # Utilise une IA inerte côté Python; aucun play_turn ne sera appelé en observer
+                null_ai_key = 'braindead'
+                self.ia1 = AI_REGISTRY.get(null_ai_key)("R", self.game_map)
+                self.ia2 = AI_REGISTRY.get(null_ai_key)("B", self.game_map)
+            elif self.local_team == 'R':
                 if self.ia1_name not in AI_REGISTRY:
                     raise ValueError(f"IA '{self.ia1_name}' non reconnue.")
                 self.ia1 = AI_REGISTRY[self.ia1_name]("R", self.game_map)
-                # On utilise un "void" pour l'équipe distante (sera pilotée par le réseau)
-                from ia.void import void
-                self.ia2 = void("B", self.game_map)
+                # IA distante remplacée par une IA inerte (contrôle via réseau)
+                self.ia2 = AI_REGISTRY.get('braindead')("B", self.game_map)
             elif self.local_team == 'B':
                 if self.ia2_name not in AI_REGISTRY:
                     raise ValueError(f"IA '{self.ia2_name}' non reconnue.")
                 self.ia2 = AI_REGISTRY[self.ia2_name]("B", self.game_map)
-                from ia.void import void
-                self.ia1 = void("R", self.game_map)
+                self.ia1 = AI_REGISTRY.get('braindead')("R", self.game_map)
             else:
                 raise ValueError(f"Équipe locale '{self.local_team}' invalide en mode réparti.")
         else:
@@ -350,11 +361,21 @@ class Engine:
 
     def process_turn(self):
         """Traite un tour de jeu (déplacements, combats, etc.)"""
+        # 0. Synchronisation entrante (mises à jour distantes)
+        if self.is_distributed:
+            self.pull_remote_state()
         red_alive = 0
         blue_alive = 0
+        state_changed = False
+        
         for unit in self.units:
             if not unit.is_alive:
                 continue
+            
+            # Stockage de l'état précédent pour détection de changement
+            prev_pos = unit.position
+            prev_hp = unit.current_hp
+            
             if unit.team == 'R':
                 red_alive += 1
                 if not self.is_distributed or self.local_team == 'R':
@@ -363,6 +384,15 @@ class Engine:
                 blue_alive += 1
                 if not self.is_distributed or self.local_team == 'B':
                     self.ia2.play_turn(unit, self.current_turn)
+            
+            # Détection de changement d'état (mouvement ou combat)
+            if self.is_distributed:
+                if (unit.team == self.local_team) and (unit.position != prev_pos or unit.current_hp != prev_hp):
+                    state_changed = True
+
+        # Objective 2 : Immediate update broadcast on local change
+        if self.is_distributed and state_changed:
+            self.push_local_state()
 
         # Enregistre l'historique pour Lanchester (tous les 10 tours pour ne pas trop alourdir)
         if "lanchester" in self.scenario_name.lower() and self.current_turn % 10 == 0:
@@ -371,6 +401,149 @@ class Engine:
             self.history['blue_units'].append(blue_alive)
         
         pass
+
+    def push_local_state(self):
+        """Diffuser l'état local via le pont réseau"""
+        try:
+            import network_bridge
+            # On envoie uniquement les unités locales (propriété réseau)
+            local_units = [u for u in self.units if getattr(u, 'is_local', False) and u.is_alive]
+            if hasattr(network_bridge, 'push_local_update'):
+                network_bridge.push_local_update(local_units)
+        except (ImportError, AttributeError):
+            pass
+
+    def pull_remote_state(self):
+        """Récupère les mises à jour distantes depuis shared_state et les applique localement.
+        N'implémente pas le transport: utilise shared_state.* si disponible.
+        """
+        try:
+            import shared_state
+        except ImportError:
+            return
+        updates = None
+        for func_name in ('pull_remote_updates', 'get_remote_updates', 'read_remote_state'):
+            if hasattr(shared_state, func_name):
+                try:
+                    updates = getattr(shared_state, func_name)()
+                except Exception:
+                    updates = None
+                break
+        if not updates:
+            return
+        # Applique chaque mise à jour
+        for up in updates:
+            try:
+                self.apply_remote_update(up)
+            except Exception:
+                continue
+
+    def apply_remote_update(self, up):
+        """Applique une mise à jour distante à une unité ennemie locale.
+        Format attendu flexible: dict ou tuple contenant au moins team, position (x,y) et/ou hp.
+        """
+        # Extraction robuste
+        team = None
+        x = y = None
+        hp = None
+        alive = None
+        utype = None
+        if isinstance(up, dict):
+            team = up.get('team') or up.get('t')
+            pos = up.get('pos') or up.get('position')
+            if isinstance(pos, (list, tuple)) and len(pos) >= 2:
+                x, y = float(pos[0]), float(pos[1])
+            else:
+                x = up.get('x')
+                y = up.get('y')
+            hp = up.get('hp') or up.get('current_hp')
+            alive = up.get('alive')
+            utype = up.get('type')
+        elif isinstance(up, (list, tuple)):
+            # Heuristique: (team, x, y, hp, alive, type)
+            try:
+                team = up[0]
+                x, y = float(up[1]), float(up[2])
+                if len(up) > 3:
+                    hp = up[3]
+                if len(up) > 4:
+                    alive = up[4]
+                if len(up) > 5:
+                    utype = up[5]
+            except Exception:
+                pass
+        # Ne met à jour que les unités non locales
+        if team is None:
+            return
+        target_team = team
+        # Trouver la meilleure unité correspondante côté non-local
+        candidates = [u for u in self.units if u.team == target_team and not getattr(u, 'is_local', False)]
+        if not candidates:
+            return
+        # Sélection par proximité si position fournie, sinon premier vivant
+        target = None
+        if x is not None and y is not None:
+            def d2(u):
+                dx = (u.position[0] - x)
+                dy = (u.position[1] - y)
+                return dx*dx + dy*dy
+            if utype is not None:
+                type_matches = [u for u in candidates if u.type == utype]
+                if type_matches:
+                    candidates = type_matches
+            target = min(candidates, key=d2)
+        else:
+            alive_candidates = [u for u in candidates if u.is_alive]
+            target = alive_candidates[0] if alive_candidates else candidates[0]
+        # Appliquer les champs connus
+        if target is None:
+            return
+        if x is not None and y is not None:
+            target.position = (x, y)
+        if hp is not None:
+            try:
+                target.current_hp = max(0, min(int(hp), target.max_hp))
+                target.is_alive = target.current_hp > 0
+                if not target.is_alive:
+                    target.state = 'dead'
+            except Exception:
+                pass
+        if alive is not None:
+            target.is_alive = bool(alive)
+            if not target.is_alive:
+                target.state = 'dead'
+
+    def request_network_ownership(self, unit):
+        """Demande la propriété réseau d'une unité (protocole de cohérence rudimentaire)."""
+        if not self.is_distributed:
+            return False
+        try:
+            import network_bridge
+            if hasattr(network_bridge, 'request_ownership'):
+                return bool(network_bridge.request_ownership(unit))
+        except Exception:
+            pass
+        # Fallback local (optimiste)
+        if unit.team == self.local_team:
+            unit.is_local = True
+            unit.network_owner = self.local_team
+            return True
+        return False
+
+    def cede_network_ownership(self, unit, new_owner_team=None):
+        """Cède la propriété réseau d'une unité."""
+        if not self.is_distributed:
+            return False
+        try:
+            import network_bridge
+            if hasattr(network_bridge, 'cede_ownership'):
+                return bool(network_bridge.cede_ownership(unit, new_owner_team))
+        except Exception:
+            pass
+        # Fallback local
+        unit.is_local = (unit.team == self.local_team and self.local_team is not None)
+        unit.network_owner = self.local_team if unit.is_local else new_owner_team
+        return True
 
     def change_view(self, view_type):
         """Change la vue du jeu (terminal ou GUI)"""

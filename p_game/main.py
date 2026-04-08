@@ -33,6 +33,9 @@ class BattleCLI:
         run_parser.add_argument("--datafile", help="Fichier de sortie pour les données")
         run_parser.add_argument("--distributed", action="store_true", help="Activer le mode réparti")
         run_parser.add_argument("--local-team", choices=['R', 'B'], help="Équipe locale en mode réparti")
+        run_parser.add_argument("--observer", action="store_true", help="Mode observateur (aucune IA locale)")
+        run_parser.add_argument("--session", help="Identifiant de session réseau (relay/room)")
+        run_parser.add_argument("--peer", help="Paramètre pair/endpoint réseau")
 
         # Commande: load
         load_parser = self.subparsers.add_parser("load", help="Charger une sauvegarde")
@@ -55,8 +58,13 @@ class BattleCLI:
 
     def cmd_run(self, args):
         print(f"[RUN] Scenario: {args.scenario}")
+        # Observer implique distribué sans équipe locale
+        if args.observer:
+            args.distributed = True
+            args.local_team = None
         if args.distributed:
-            print(f"      Mode: Réparti (Équipe locale: {args.local_team})")
+            mode = "Observateur" if args.observer else "Réparti"
+            print(f"      Mode: {mode} (Équipe locale: {args.local_team})")
         else:
             print(f"      ias: {args.ia1} vs {args.ia2}")
 
@@ -70,6 +78,21 @@ class BattleCLI:
         engine = Engine(args.scenario, args.ia1, args.ia2, view_type, 
                         is_distributed=args.distributed, 
                         local_team=args.local_team)
+        
+        if args.distributed:
+            try:
+                import network_bridge
+                # player_id: R=1, B=2, None en observer
+                player_id = None if args.local_team is None else (1 if args.local_team == 'R' else 2)
+                if hasattr(network_bridge, 'init'):
+                    # Passage optionnel des paramètres de session sans imposer une signature
+                    try:
+                        network_bridge.init(player_id, session=args.session, peer=args.peer)
+                    except TypeError:
+                        network_bridge.init(player_id)
+            except (ImportError, AttributeError):
+                print("[WARNING] network_bridge.init() failed or not found.")
+
         engine.start()
 
     def cmd_load(self, args):
