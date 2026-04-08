@@ -12,7 +12,6 @@ from random import randint
 from numpy import mean
 
 from ia.registry import AI_REGISTRY
-from reports.reporter import generate_report 
 
 def fix_string(string):
     """Transforme une chaîne de caractères en une version "fixe" (minuscules, sans espaces ou caractères spéciaux)"""

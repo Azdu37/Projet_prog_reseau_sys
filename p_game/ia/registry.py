@@ -19,14 +19,13 @@ All names are stored in lowercase without spaces or special characters.
 
 AI_REGISTRY = {
     "smartia": Smart_IA,
-    #"braindead": Brain_DEAD,
+    "braindead": Brain_DEAD,
     "majordaft": MajorDaft,
-    #"daft": MajorDaft,
+    "daft": MajorDaft,
     "strategus20" : Strategus20,
     "tacticus20": Behaviour3,
     "basicia": Basic_IA,
     "strategus10" : Strategus10,
-    #"plotlanchester": Basic_IA,  # l'ia de lanchester
 
 }
 """"coordia": CoordIA,

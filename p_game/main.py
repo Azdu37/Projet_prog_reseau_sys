@@ -210,5 +210,7 @@ if __name__ == "__main__":
     if len(sys.argv) == 1:
         pass
 
+    sys.argv = ["main.py", "run","stest7","majordaft", "brain_dead"]
+
 
     BattleCLI().run()
