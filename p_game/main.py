@@ -7,7 +7,7 @@ import sys
 import os
 
 from battle.engine import Engine
-from tournaments.tournament_manager import TournamentManager
+
 from battle.scenario import Scenario
 from ia.registry import AI_REGISTRY
 global tps
@@ -28,7 +28,6 @@ def help():
     print("Utilisation : battle <commande> [options]")
     print("battle run <scenario> <ia1> <ia2> / Lancer une bataille entre deux IA")
     print("battle load <save> / Charger une bataille ou un tournoi sauvegardé")
-    print("battle tournament / Lancer un tournoi automatique")
     print("battle plot <AI> <plotter> <scenario> <units> <range> [-N=10] / Vérifier les lois de Lanchester")
     print("")
     
@@ -58,14 +57,14 @@ def help():
     
     print("Exemple de commandes :")
     print("python3 main.py battle run stest6 smartia  Major_DAFT")
-    print("python3 main.py battle tournament")
+
     print("python3 main.py battle load stest1 (ou stest1_save)")
 
 class BattleCLI:
     def __init__(self):
         parser = argparse.ArgumentParser(
             prog="battle",
-            description="Battle simulation CLI — run matches, load saves, tournaments, and plot results."
+            description="Battle simulation CLI — run matches, load saves, and plot results."
         )
         subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -89,12 +88,6 @@ class BattleCLI:
         plot_parser.add_argument("-N", "--num_matches", type=int, default=10, help="Number of matches per point")
         plot_parser.add_argument("--out", default="lanchester_plot_report.html", help="Output report file")
 
-        t = subparsers.add_parser("tournament", help="Lance un tournoi automatique")
-        t.add_argument("--generals", nargs="+", default=["all"])
-        t.add_argument("--scenarios", nargs="+", default=["all"])
-        t.add_argument("--matches", type=int)
-        t.add_argument("--out", default="tournament_report.html")
-        t.add_argument("--scenario-dir", default="data/scenario")
 
         # === battle load <savefile> ===
         load_parser = subparsers.add_parser("load", help="Load a previously saved battle or tournament.")
@@ -128,8 +121,8 @@ class BattleCLI:
                 self.cmd_run(args)
             case "load":
                 self.cmd_load(args)
-            case "tournament":
-                self.cmd_tournament(args)
+
+
             case "plot":
                 self.cmd_plot(args)
 
@@ -176,34 +169,9 @@ class BattleCLI:
         engine = Engine(name, ia1, ia2, view_type)
         engine.start()
 
-    def cmd_tournament(self, args):
-        kwargs = {
-            "out_file": args.out,
-            "scenario_dir": args.scenario_dir,
-        }
 
-        if args.generals != ["all"]:
-            kwargs["generals"] = args.generals
 
-        if args.scenarios != ["all"]:
-            kwargs["scenarios"] = args.scenarios
 
-        if args.matches is not None:
-            kwargs["matches_per_pair"] = args.matches
-
-        TournamentManager(**kwargs)
-
-    def cmd_plot(self, args):
-        from tournaments.lanchester_manager import LanchesterPlotManager
-        LanchesterPlotManager(
-            ia1=args.ia,
-            ia2=args.plotter,
-            scenario_base=args.scenario,
-            units_str=args.units,
-            range_str=args.range,
-            out_file=args.out,
-            num_matches=args.num_matches
-        )
 
 
 if __name__ == "__main__":

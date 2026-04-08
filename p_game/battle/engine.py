@@ -64,7 +64,7 @@ def randomize_order(units):
 
 
 class Engine:
-    def __init__(self, scenario, ia1, ia2, view_type, tournaments=False):
+    def __init__(self, scenario, ia1, ia2, view_type):
 
         self.scenario_name = scenario
         self.ia1 = fix_string(ia1)
@@ -80,13 +80,11 @@ class Engine:
         self.view = None
         self.pressed_keys = set()
         self.real_tps = 0
-        self.tournaments = tournaments
         # Historique des t/s des dernières turns (max 10)
         self.tab_game_tps = deque(maxlen=10)
         self.tab_tps_affichage = deque(maxlen=120)
 
         self.star_execution_time = None
-        # Nouvelles stats tournois
         self.ia_thinking_time = {'R': 0.0, 'B': 0.0}
         self.initial_units_count = {'R': 0, 'B': 0}
         self.history = {'turns': [], 'red_units': [], 'blue_units': []}
@@ -118,7 +116,7 @@ class Engine:
     def load_scenario(self):
         """Charge le scénario depuis le fichier"""
 
-        if not self.tournaments: print(f"Loading scenario: {self.scenario_name}")
+        print(f"Loading scenario: {self.scenario_name}")
         self.game_map = Map()
         Map.load(self.game_map, self.scenario_name)
 
@@ -136,49 +134,27 @@ class Engine:
         self.ia1.initialize()
         self.ia2.initialize()
         
-        if not self.tournaments: print(f"Initializing AIs: {self.ia1.name} vs {self.ia2.name}")
+        print(f"Initializing AIs: {self.ia1.name} vs {self.ia2.name}")
         pass
     
     
     def start(self):
         """Démarre la simulation de bataille"""
-        if not self.tournaments:
-            if not self.tournaments: print("=== Starting Battle ===")
+        print("=== Starting Battle ===")
 
-            # Initialisation du mode de terminal pour Linux/Mac
-            old_settings = None
-            if os.name != 'nt' and sys.stdin.isatty():
-                old_settings = termios.tcgetattr(sys.stdin)
-                tty.setcbreak(sys.stdin.fileno())
+        # Initialisation du mode de terminal pour Linux/Mac
+        old_settings = None
+        if os.name != 'nt' and sys.stdin.isatty():
+            old_settings = termios.tcgetattr(sys.stdin)
+            tty.setcbreak(sys.stdin.fileno())
 
-            try:
-                # Initialisation
-                self.load_scenario()
-                self.initialize_ai()
-
-                if (not self.tournaments) or self.view_type > 0:
-                    self.initialize_view()
-                self.initialize_units()
-
-                self.is_running = True
-                self.star_execution_time = time.time()
-
-                randomize_order(self.units)
-
-                # Boucle principale
-                self.game_loop()
-            finally:
-                # Restauration du mode de terminal
-                if old_settings:
-                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-
-            # Fin de partie
-            return self.end_battle()
-        if self.tournaments:
-
+        try:
+            # Initialisation
             self.load_scenario()
             self.initialize_ai()
 
+            if self.view_type > 0:
+                self.initialize_view()
             self.initialize_units()
 
             self.is_running = True
@@ -188,9 +164,13 @@ class Engine:
 
             # Boucle principale
             self.game_loop()
-            return self.end_battle()
-        else:
-            print('problème')
+        finally:
+            # Restauration du mode de terminal
+            if old_settings:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+
+        # Fin de partie
+        return self.end_battle()
 
     def game_loop(self):
         """Boucle principale du jeu"""
@@ -203,88 +183,78 @@ class Engine:
 
         while self.is_running and self.current_turn < self.max_turns:
             turn_start = time.time()
-            if self.tournaments:
+
+            if not self.game_pause:
+                ######################################################
+                #####             - FPS throttling -          ########
+                #####      " C'est moche mais ca marche "     ########
+                ######################################################
+                # FPS jamais au dessus de  TPS
+                # FPS jamais au dessus de  max_fps
+                # FPS jamais en dessous de min_fps, sauf si TPS < min_fps
+                if self.view_type > 1 and self.current_turn % 5 == 0:
+
+                    if self.real_tps == 0: tps =60
+                    else: tps = self.real_tps
+                    if self.tps <= 0:
+                        self.tps =0
+                        perf =1
+                    else: perf = tps / (self.tps)  # stabilise autour de tps cible
+
+                    #self.turn_time_target = 1.0 / max(self.tps,1)
+                    #print(perf)
+
+                    view_frame_time= max(min(( view_frame_time / perf), self.max_frame_delay), self.min_frame_delay)
+
+                    self.turn_time_target = max(min(( self.turn_time_target * perf), 1/(self.tps+3)), 1/(self.tps+30))
+
+
+                    view_frame_time =max( 1/tps , view_frame_time)   #fps jamais > tps
+                    self.turn_fps = 1 / view_frame_time
+                    max_turn_time = self.turn_time_target
+
+                    #print(1/max_turn_time)
+                    ##################################################################
+
                 self.process_turn()
+                # 1. Gérer les entrées
+                if self.view_type == 1:
+                    self.handle_input()
+                # 2. Mettre à jour l'affichage
+                if turn_start >= next_view_time and self.view_type > 0:
+                    next_view_time = turn_start + view_frame_time
+                    self.update_view()
+                # 3. Vérifier les conditions de victoire
                 self.check_victory()
+                # 4. Passer au tour suivant
                 self.current_turn += 1
+                # 5 mets a jour les unités
                 self.update_units(1 / 60)
                 self.update_projectiles()
-                turn_time = time.time() - turn_start
-                if turn_time > 0:
-                    self.tab_game_tps.append((1.0 / turn_time))
+                # 5. Contrôle du turn rate
+                self.turn_time = time.time() - turn_start
+                if self.view and self.turn_time < max_turn_time:
+                    time.sleep(max_turn_time - self.turn_time)
+                turn_time_plusp = time.time() - turn_start
+                if turn_time_plusp != 0:
+                    self.tab_game_tps.append((1.0 / turn_time_plusp))
+                    self.tab_tps_affichage.append(1.0 / turn_time_plusp)
                 self.real_tps = (sum(self.tab_game_tps) / len(self.tab_game_tps)) if self.tab_game_tps else 0
+                self.time_turn = time.time()
+
+
             else:
-                if not self.game_pause:
-                    ######################################################
-                    #####             - FPS throttling -          ########
-                    #####      " C'est moche mais ca marche "     ########
-                    ######################################################
-                    # FPS jamais au dessus de  TPS
-                    # FPS jamais au dessus de  max_fps
-                    # FPS jamais en dessous de min_fps, sauf si TPS < min_fps
-                    if self.view_type > 1 and self.current_turn % 5 == 0:
-
-                        if self.real_tps == 0: tps =60 
-                        else: tps = self.real_tps
-                        if self.tps <= 0: 
-                            self.tps =0
-                            perf =1
-                        else: perf = tps / (self.tps)  # stabilise autour de tps cible
-                        
-                        #self.turn_time_target = 1.0 / max(self.tps,1)
-                        #print(perf)
-
-                        view_frame_time= max(min(( view_frame_time / perf), self.max_frame_delay), self.min_frame_delay)
-
-                        self.turn_time_target = max(min(( self.turn_time_target * perf), 1/(self.tps+3)), 1/(self.tps+30))
-                        
-                        
-                        view_frame_time =max( 1/tps , view_frame_time)   #fps jamais > tps
-                        self.turn_fps = 1 / view_frame_time
-                        max_turn_time = self.turn_time_target 
-
-                        #print(1/max_turn_time)
-                        ##################################################################
-
-                    self.process_turn()
-                    # 1. Gérer les entrées
-                    if self.view_type == 1:
-                        self.handle_input()
-                    # 2. Mettre à jour l'affichage
-                    if turn_start >= next_view_time and self.view_type > 0:
-                        next_view_time = turn_start + view_frame_time
+                if self.view_type == 1: self.handle_input()
+                if turn_start >= next_view_time:
+                    next_view_time = turn_start + view_frame_time
+                    if self.view_type > 0:
                         self.update_view()
-                    # 3. Vérifier les conditions de victoire
-                    self.check_victory()
-                    # 4. Passer au tour suivant
-                    self.current_turn += 1
-                    # 5 mets a jour les unités
-                    self.update_units(1 / 60)
-                    self.update_projectiles()
-                    # 5. Contrôle du turn rate
-                    self.turn_time = time.time() - turn_start
-                    if self.view and self.turn_time < max_turn_time:
-                        time.sleep(max_turn_time - self.turn_time)
-                    turn_time_plusp = time.time() - turn_start
-                    if turn_time_plusp != 0:
-                        self.tab_game_tps.append((1.0 / turn_time_plusp))
-                        self.tab_tps_affichage.append(1.0 / turn_time_plusp)
-                    self.real_tps = (sum(self.tab_game_tps) / len(self.tab_game_tps)) if self.tab_game_tps else 0
-                    self.time_turn = time.time()
-
-
-                else:
-                    if self.view_type == 1: self.handle_input()
-                    if turn_start >= next_view_time:
-                        next_view_time = turn_start + view_frame_time
-                        if self.view_type > 0:
-                            self.update_view()
-                    turn_time = time.time() - turn_start
-                    if self.view and turn_time < max_turn_time:
-                        time.sleep(max_turn_time - turn_time)
-                    turn_time_plusp = time.time() - turn_start
-                    if turn_time_plusp != 0:
-                        self.tab_game_tps.append((1.0 / turn_time_plusp))
+                turn_time = time.time() - turn_start
+                if self.view and turn_time < max_turn_time:
+                    time.sleep(max_turn_time - turn_time)
+                turn_time_plusp = time.time() - turn_start
+                if turn_time_plusp != 0:
+                    self.tab_game_tps.append((1.0 / turn_time_plusp))
 
 
 
@@ -495,28 +465,26 @@ class Engine:
 
     def end_battle(self):
         """Termine la bataille et affiche les résultats"""
-        if self.view == 1 and not self.tournaments: self.update_view()
+        if self.view == 1: self.update_view()
 
         # Rapport Lanchester si applicable
-        if not self.tournaments and "lanchester" in self.scenario_name.lower():
-            self.rapport_lanchester()
 
-        if not self.tournaments:
-            print("\n=== Battle Ended ===")
-            if self.winner:
-                print(f"Winner: {self.winner.name, self.winner.team}")
-            else:
-                print("Draw or max turns reached")
-            print(f"Total turns: {self.current_turn}")
-            print(
-                f"temps d'éxécution totale {time.time() - self.star_execution_time:.2f}, ce qui fait {self.current_turn / (time.time() - self.star_execution_time):.2f} tps en moyenne")
-            # 125.81309372244759  fps pour le gui
-            # 394.581443523516 fps pour le terminal
-            # 1027.9418369857085 fps pour le no terminal
-            return None
 
+
+        print("\n=== Battle Ended ===")
+        if self.winner:
+            print(f"Winner: {self.winner.name, self.winner.team}")
         else:
+            print("Draw or max turns reached")
+        print(f"Total turns: {self.current_turn}")
+        print(
+            f"temps d'éxécution totale {time.time() - self.star_execution_time:.2f}, ce qui fait {self.current_turn / (time.time() - self.star_execution_time):.2f} tps en moyenne")
+        # 125.81309372244759  fps pour le gui
+        # 394.581443523516 fps pour le terminal
+        # 1027.9418369857085 fps pour le no terminal
+        return None
 
+""" peut être utile plus tard
             return {
                 'turn': self.current_turn,
                 'scenario': str(self.scenario_name),
@@ -529,7 +497,7 @@ class Engine:
                 'winner_ia': str(self.winner.name) if self.winner else "draw",
                 'winner_team': str(self.winner.team) if self.winner else None
             }
-
+"""
         
 
     def pause(self):
