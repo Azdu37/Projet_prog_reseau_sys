@@ -134,6 +134,11 @@ int net_send_state_update(const UnitState *unit,
     msg.unit      = *unit;
     msg.unit.dirty = 0;   /* Le destinataire ne reçoit pas le flag dirty */
 
+    printf("[net] -> Envoi paquet UDP (%d octets) vers peer %d (%s:%d) — UNIT_ID: %d\n",
+           (int)sizeof(NetMessage), peer_id,
+           inet_ntoa(dest->addr.sin_addr), ntohs(dest->addr.sin_port),
+           msg.unit_id);
+
     ssize_t sent = sendto(g_sock,
                           &msg, sizeof(NetMessage), 0,
                           (struct sockaddr *)&dest->addr,
@@ -187,9 +192,13 @@ int net_recv(NetMessage *msg_out)
 
     /* Vérifie le magic number pour ignorer les paquets parasites */
     if (msg_out->magic != PROTOCOL_MAGIC) {
-        fprintf(stderr, "[net] magic invalide, paquet ignoré\n");
+        fprintf(stderr, "[net] <- Reçu paquet parasite de %s:%d (magic invalide), ignoré\n",
+                inet_ntoa(sender_addr.sin_addr), ntohs(sender_addr.sin_port));
         return 0;
     }
+
+    printf("[net] <- Reçu paquet UDP de %s:%d (%ld octets) — MSG_TYPE: %d\n",
+           inet_ntoa(sender_addr.sin_addr), ntohs(sender_addr.sin_port), (long)n, msg_out->type);
 
     return 1;
 }
