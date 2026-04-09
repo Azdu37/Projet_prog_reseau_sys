@@ -1,7 +1,6 @@
-#ifndef MBAI_C_PROTOCOL_H
-#define MBAI_C_PROTOCOL_H
+#ifndef PROTOCOL_H
+#define PROTOCOL_H
 
-/* C side wrapper around the shared battle protocol contract. */
-#include "../shared/protocol.h"
+#include "protocol_def.h"
 
-#endif /* MBAI_C_PROTOCOL_H */
+#endif

@@ -1,30 +1,17 @@
-CC ?= gcc
-CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic -I. -I../shared
-LDFLAGS ?=
-LDLIBS ?= -pthread
+CC      = gcc
+CFLAGS  = -Wall -Wextra -std=gnu99 -pthread -O2 -I../shared
+LDFLAGS = -lpthread
+SRC     = main.c network.c ipc_local.c protocol.c
+OBJ     = $(SRC:.c=.o)
 
-TARGET := mbai_ipc_test
-SRCS := main.c ipc.c
-OBJS := $(SRCS:.c=.o)
+all: build/network
 
-.PHONY: all clean run cleanup test
-
-all: $(TARGET)
-
-$(TARGET): $(OBJS)
-	$(CC) $(OBJS) $(LDFLAGS) $(LDLIBS) -o $@
+build/network: $(OBJ)
+	mkdir -p build
+	$(CC) $(OBJ) -o $@ $(LDFLAGS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-run: $(TARGET)
-	./$(TARGET)
-
-cleanup: $(TARGET)
-	./$(TARGET) cleanup
-
-test:
-	bash ../scripts/test_network.sh
-
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(OBJ) build/network

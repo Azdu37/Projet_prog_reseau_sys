@@ -27,6 +27,8 @@ class Unit:
         # Ownership réseau (défini par le moteur en mode réparti)
         self.is_local = False  # True si l'unité est pilotée localement
         self.network_owner = None  # Optionnel: identifiant/équipe propriétaire
+        self.unit_id = 0       # Identifiant unique réseau
+        self.owner_id = 0      # Identifiant du propriétaire (R=1, B=2)
         self.squad = []
         self.squad.append(self)
         self.get_hit = 0

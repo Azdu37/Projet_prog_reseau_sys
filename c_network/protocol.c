@@ -1,1 +1,1 @@
-// Protocoles de jeu (propriété réseau, etc.)
+#include "protocol.h"
