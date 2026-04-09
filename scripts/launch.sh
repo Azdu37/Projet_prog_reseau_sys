@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# On se place à la racine du projet
+cd "$(dirname "$0")/.."
+
 # 1. Build C process if needed
 (cd c_network && make build/network)
 
