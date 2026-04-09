@@ -18,6 +18,10 @@ for path in ["data/scenario", "data/save", "data/savedata"]:
     if not os.path.exists(path):
         os.makedirs(path)
 
+import subprocess
+import network_bridge
+import time
+
 class BattleCLI:
     def __init__(self):
         self.parser = argparse.ArgumentParser(description="MedievAIl - BAIttle GenerAIl")
@@ -36,6 +40,7 @@ class BattleCLI:
         run_parser.add_argument("--observer", action="store_true", help="Mode observateur (aucune IA locale)")
         run_parser.add_argument("--session", help="Identifiant de session réseau (relay/room)")
         run_parser.add_argument("--peer", help="Paramètre pair/endpoint réseau")
+        run_parser.add_argument("--p2p-port", type=int, default=5555, help="Port P2P local")
 
         # Commande: load
         load_parser = self.subparsers.add_parser("load", help="Charger une sauvegarde")
@@ -80,20 +85,30 @@ class BattleCLI:
                         local_team=args.local_team)
         
         if args.distributed:
-            try:
-                import network_bridge
-                # player_id: R=1, B=2, None en observer
-                player_id = None if args.local_team is None else (1 if args.local_team == 'R' else 2)
-                if hasattr(network_bridge, 'init'):
-                    # Passage optionnel des paramètres de session sans imposer une signature
-                    try:
-                        network_bridge.init(player_id, session=args.session, peer=args.peer)
-                    except TypeError:
-                        network_bridge.init(player_id)
-            except (ImportError, AttributeError):
-                print("[WARNING] network_bridge.init() failed or not found.")
+            # 1. Start C network process
+            player_id = 1 if args.local_team == 'R' else (2 if args.local_team == 'B' else 0)
+            peers = args.peer if args.peer else ""
+            c_proc = subprocess.Popen([
+                "../c_network/build/network",
+                "--id",    str(player_id),
+                "--peers", peers,
+                "--p2p-port", str(args.p2p_port),
+            ])
+            
+            # 2. Init network bridge
+            network_bridge.init(player_id)
+            network_bridge.start_listener(engine.apply_remote_update)
+            
+            print(f"[NETWORK] C process started (PID={c_proc.pid})")
+            time.sleep(0.3)
 
-        engine.start()
+        try:
+            engine.start()
+        finally:
+            if args.distributed:
+                network_bridge.shutdown()
+                c_proc.terminate()
+                c_proc.wait()
 
     def cmd_load(self, args):
         # Implémentation simplifiée du chargement

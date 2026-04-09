@@ -112,8 +112,11 @@ class Engine:
 
     def initialize_units(self):
         """charge la liste d'unite"""
+        uid = 1
         for (x, y) in self.game_map.map:
             u = self.game_map.get_unit(x, y)
+            u.unit_id = uid
+            uid += 1
             u.direction = (0, 0)
             # Définition du propriétaire réseau local
             if self.is_distributed:
@@ -122,7 +125,17 @@ class Engine:
             else:
                 u.is_local = True
                 u.network_owner = u.team
+            u.owner_id = 1 if u.team == 'R' else 2
             self.units.append(u)
+
+    def all_units(self):
+        return self.units
+
+    def find_unit(self, unit_id):
+        for u in self.units:
+            if getattr(u, 'unit_id', None) == unit_id:
+                return u
+        return None
 
     def load_scenario(self):
         """Charge le scénario depuis le fichier"""
@@ -361,9 +374,7 @@ class Engine:
 
     def process_turn(self):
         """Traite un tour de jeu (déplacements, combats, etc.)"""
-        # 0. Synchronisation entrante (mises à jour distantes)
-        if self.is_distributed:
-            self.pull_remote_state()
+        # 0. Synchronisation entrante (mises à jour distantes via thread network_bridge)
         red_alive = 0
         blue_alive = 0
         state_changed = False
@@ -404,114 +415,31 @@ class Engine:
 
     def push_local_state(self):
         """Diffuser l'état local via le pont réseau"""
-        try:
-            import network_bridge
-            # On envoie uniquement les unités locales (propriété réseau)
-            local_units = [u for u in self.units if getattr(u, 'is_local', False) and u.is_alive]
-            if hasattr(network_bridge, 'push_local_update'):
-                network_bridge.push_local_update(local_units)
-        except (ImportError, AttributeError):
-            pass
+        import network_bridge
+        network_bridge.push_local_update(self)
 
-    def pull_remote_state(self):
-        """Récupère les mises à jour distantes depuis shared_state et les applique localement.
-        N'implémente pas le transport: utilise shared_state.* si disponible.
-        """
-        try:
-            import shared_state
-        except ImportError:
+    def apply_remote_update(self, state):
+        """Version 1: overwrite remote units with received values. No conflict resolution."""
+        if not isinstance(state, dict) or "units" not in state:
             return
-        updates = None
-        for func_name in ('pull_remote_updates', 'get_remote_updates', 'read_remote_state'):
-            if hasattr(shared_state, func_name):
-                try:
-                    updates = getattr(shared_state, func_name)()
-                except Exception:
-                    updates = None
-                break
-        if not updates:
-            return
-        # Applique chaque mise à jour
-        for up in updates:
-            try:
-                self.apply_remote_update(up)
-            except Exception:
+
+        for u in state["units"]:
+            # Ne pas appliquer si on est l'owner (déjà mis à jour localement)
+            # player_id: R=1, B=2
+            my_id = 1 if self.local_team == 'R' else (2 if self.local_team == 'B' else 0)
+            if u["owner_id"] == my_id and my_id != 0:
                 continue
 
-    def apply_remote_update(self, up):
-        """Applique une mise à jour distante à une unité ennemie locale.
-        Format attendu flexible: dict ou tuple contenant au moins team, position (x,y) et/ou hp.
-        """
-        # Extraction robuste
-        team = None
-        x = y = None
-        hp = None
-        alive = None
-        utype = None
-        if isinstance(up, dict):
-            team = up.get('team') or up.get('t')
-            pos = up.get('pos') or up.get('position')
-            if isinstance(pos, (list, tuple)) and len(pos) >= 2:
-                x, y = float(pos[0]), float(pos[1])
+            existing = self.find_unit(u["unit_id"])
+            if existing:
+                existing.position = (u["x"], u["y"])
+                existing.current_hp = u["hp"]
+                existing.is_alive = existing.current_hp > 0
+                if not existing.is_alive:
+                    existing.state = 'dead'
             else:
-                x = up.get('x')
-                y = up.get('y')
-            hp = up.get('hp') or up.get('current_hp')
-            alive = up.get('alive')
-            utype = up.get('type')
-        elif isinstance(up, (list, tuple)):
-            # Heuristique: (team, x, y, hp, alive, type)
-            try:
-                team = up[0]
-                x, y = float(up[1]), float(up[2])
-                if len(up) > 3:
-                    hp = up[3]
-                if len(up) > 4:
-                    alive = up[4]
-                if len(up) > 5:
-                    utype = up[5]
-            except Exception:
+                # Facultatif pour V1: ajouter l'unité si elle n'existe pas
                 pass
-        # Ne met à jour que les unités non locales
-        if team is None:
-            return
-        target_team = team
-        # Trouver la meilleure unité correspondante côté non-local
-        candidates = [u for u in self.units if u.team == target_team and not getattr(u, 'is_local', False)]
-        if not candidates:
-            return
-        # Sélection par proximité si position fournie, sinon premier vivant
-        target = None
-        if x is not None and y is not None:
-            def d2(u):
-                dx = (u.position[0] - x)
-                dy = (u.position[1] - y)
-                return dx*dx + dy*dy
-            if utype is not None:
-                type_matches = [u for u in candidates if u.type == utype]
-                if type_matches:
-                    candidates = type_matches
-            target = min(candidates, key=d2)
-        else:
-            alive_candidates = [u for u in candidates if u.is_alive]
-            target = alive_candidates[0] if alive_candidates else candidates[0]
-        # Appliquer les champs connus
-        if target is None:
-            return
-        if x is not None and y is not None:
-            target.position = (x, y)
-        if hp is not None:
-            try:
-                target.current_hp = max(0, min(int(hp), target.max_hp))
-                target.is_alive = target.current_hp > 0
-                if not target.is_alive:
-                    target.state = 'dead'
-            except Exception:
-                pass
-        if alive is not None:
-            target.is_alive = bool(alive)
-            if not target.is_alive:
-                target.state = 'dead'
 
     def request_network_ownership(self, unit):
         """Demande la propriété réseau d'une unité (protocole de cohérence rudimentaire)."""
