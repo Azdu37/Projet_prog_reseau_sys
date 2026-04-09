@@ -1,230 +1,173 @@
-#define _POSIX_C_SOURCE 200809L
+/*
+ * ipc.c — Mémoire partagée POSIX + sémaphores
+ *
+ * Permet au processus C et à Python de partager un GameState
+ * via un segment de mémoire partagée nommé (shm_open / mmap).
+ *
+ * Compilation : gcc ... -lrt -lpthread
+ * (sous WSL / Linux uniquement)
+ */
 
 #include "ipc.h"
 
-#include <errno.h>
-#include <fcntl.h>
-#include <semaphore.h>
-#include <stddef.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
+#include <errno.h>
+#include <fcntl.h>          /* O_CREAT, O_RDWR */
+#include <sys/mman.h>       /* shm_open, mmap   */
 #include <sys/stat.h>
-#include <sys/types.h>
+#include <semaphore.h>
 #include <unistd.h>
 
-struct ipc_context_s {
-    int shm_fd;
-    sem_t *state_sem;
-    mbai_game_state_t *state;
-    size_t state_size;
-};
+/* ─────────────────────────────────────────────
+ * État interne du module
+ * ───────────────────────────────────────────── */
+static GameState *g_shm    = NULL;   /* pointeur vers la shm mappée  */
+static int        g_shm_fd = -1;     /* descripteur du segment shm   */
+static sem_t     *g_sem_w  = NULL;   /* sémaphore écriture (Python→C)*/
+static sem_t     *g_sem_r  = NULL;   /* sémaphore lecture  (C→Python)*/
+static int        g_owner  = 0;      /* 1 = on a créé les ressources */
 
-static void ipc_initialize_state(mbai_game_state_t *state,
-                                 uint32_t local_peer_id,
-                                 uint32_t map_width,
-                                 uint32_t map_height)
+/* Noms mémorisés pour le cleanup */
+static char g_shm_name[64];
+static char g_sem_w_name[64];
+static char g_sem_r_name[64];
+
+/* ─────────────────────────────────────────────
+ * ipc_init
+ * ───────────────────────────────────────────── */
+int ipc_init(const char *shm_name,
+             const char *sem_w_name,
+             const char *sem_r_name,
+             int create)
 {
-    memset(state, 0, sizeof(*state));
-    state->magic = MBAI_PROTOCOL_MAGIC;
-    state->version = MBAI_PROTOCOL_VERSION;
-    state->header_size = (uint32_t)offsetof(mbai_game_state_t, units);
-    state->total_size = (uint32_t)sizeof(*state);
-    state->unit_count = 0u;
-    state->max_units = MBAI_MAX_UNITS;
-    state->map_width = map_width;
-    state->map_height = map_height;
-    state->local_peer_id = local_peer_id;
-}
+    int flags = O_RDWR | (create ? O_CREAT : 0);
 
-static int ipc_open_shared_memory(int *out_fd, int *out_created)
-{
-    int shm_fd = shm_open(MBAI_SHM_NAME, O_CREAT | O_EXCL | O_RDWR, 0666);
-    if (shm_fd >= 0) {
-        *out_fd = shm_fd;
-        *out_created = 1;
-        return 0;
-    }
-
-    if (errno != EEXIST) {
+    /* --- Mémoire partagée --- */
+    g_shm_fd = shm_open(shm_name, flags, 0666);
+    if (g_shm_fd < 0) {
+        perror("[ipc] shm_open");
         return -1;
     }
 
-    shm_fd = shm_open(MBAI_SHM_NAME, O_RDWR, 0666);
-    if (shm_fd < 0) {
-        return -1;
-    }
-
-    *out_fd = shm_fd;
-    *out_created = 0;
-    return 0;
-}
-
-static int ipc_prepare_mapping(int shm_fd, size_t state_size, mbai_game_state_t **out_state)
-{
-    if (ftruncate(shm_fd, (off_t)state_size) != 0) {
-        return -1;
-    }
-
-    void *mapped = mmap(NULL, state_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if (mapped == MAP_FAILED) {
-        return -1;
-    }
-
-    *out_state = (mbai_game_state_t *)mapped;
-    return 0;
-}
-
-static int ipc_open_semaphore(sem_t **out_sem)
-{
-    sem_t *state_sem = sem_open(MBAI_STATE_SEM_NAME, O_CREAT, 0666, 1);
-    if (state_sem == SEM_FAILED) {
-        return -1;
-    }
-
-    *out_sem = state_sem;
-    return 0;
-}
-
-int ipc_init(ipc_context_t **out_context,
-             uint32_t local_peer_id,
-             uint32_t map_width,
-             uint32_t map_height)
-{
-    ipc_context_t *context = NULL;
-    int created = 0;
-    int locked = 0;
-
-    if (out_context == NULL) {
-        errno = EINVAL;
-        return -1;
-    }
-
-    *out_context = NULL;
-
-    context = (ipc_context_t *)calloc(1, sizeof(*context));
-    if (context == NULL) {
-        return -1;
-    }
-
-    context->shm_fd = -1;
-    context->state_sem = NULL;
-    context->state = NULL;
-    context->state_size = sizeof(mbai_game_state_t);
-
-    if (ipc_open_shared_memory(&context->shm_fd, &created) != 0) {
-        goto error;
-    }
-
-    if (ipc_prepare_mapping(context->shm_fd, context->state_size, &context->state) != 0) {
-        goto error;
-    }
-
-    if (ipc_open_semaphore(&context->state_sem) != 0) {
-        goto error;
-    }
-
-    if (ipc_lock(context) != 0) {
-        goto error;
-    }
-    locked = 1;
-
-    if (created ||
-        context->state->magic != MBAI_PROTOCOL_MAGIC ||
-        context->state->version != MBAI_PROTOCOL_VERSION ||
-        context->state->total_size != sizeof(mbai_game_state_t)) {
-        ipc_initialize_state(context->state, local_peer_id, map_width, map_height);
-    }
-
-    if (ipc_unlock(context) != 0) {
-        goto error;
-    }
-    locked = 0;
-
-    *out_context = context;
-    return 0;
-
-error:
-    {
-        int saved_errno = errno;
-        if (locked) {
-            ipc_unlock(context);
-        }
-        ipc_close(context);
-        errno = saved_errno;
-    }
-    return -1;
-}
-
-int ipc_lock(ipc_context_t *context)
-{
-    if (context == NULL || context->state_sem == NULL) {
-        errno = EINVAL;
-        return -1;
-    }
-
-    while (sem_wait(context->state_sem) == -1) {
-        if (errno != EINTR) {
+    if (create) {
+        /* Fixe la taille du segment */
+        if (ftruncate(g_shm_fd, sizeof(GameState)) < 0) {
+            perror("[ipc] ftruncate");
+            close(g_shm_fd);
             return -1;
         }
     }
 
-    return 0;
-}
-
-int ipc_unlock(ipc_context_t *context)
-{
-    if (context == NULL || context->state_sem == NULL) {
-        errno = EINVAL;
+    /* Mappe le segment en mémoire */
+    g_shm = mmap(NULL, sizeof(GameState),
+                 PROT_READ | PROT_WRITE,
+                 MAP_SHARED, g_shm_fd, 0);
+    if (g_shm == MAP_FAILED) {
+        perror("[ipc] mmap");
+        close(g_shm_fd);
         return -1;
     }
 
-    return sem_post(context->state_sem);
+    if (create) {
+        /* Initialise l'état avec le magic number */
+        memset(g_shm, 0, sizeof(GameState));
+        g_shm->magic   = PROTOCOL_MAGIC;
+        g_shm->version = PROTOCOL_VERSION;
+    } else {
+        /* Vérifie que la shm est bien initialisée */
+        if (g_shm->magic != PROTOCOL_MAGIC) {
+            fprintf(stderr, "[ipc] magic mismatch: 0x%08X\n", g_shm->magic);
+            munmap(g_shm, sizeof(GameState));
+            close(g_shm_fd);
+            return -1;
+        }
+    }
+
+    /* --- Sémaphores --- */
+    int sem_flags = O_CREAT;
+    g_sem_w = sem_open(sem_w_name, sem_flags, 0666, 1); /* init à 1 = libre */
+    if (g_sem_w == SEM_FAILED) {
+        perror("[ipc] sem_open write");
+        munmap(g_shm, sizeof(GameState));
+        close(g_shm_fd);
+        return -1;
+    }
+
+    g_sem_r = sem_open(sem_r_name, sem_flags, 0666, 1);
+    if (g_sem_r == SEM_FAILED) {
+        perror("[ipc] sem_open read");
+        sem_close(g_sem_w);
+        munmap(g_shm, sizeof(GameState));
+        close(g_shm_fd);
+        return -1;
+    }
+
+    /* Sauvegarde les noms pour le cleanup */
+    strncpy(g_shm_name,   shm_name,   sizeof(g_shm_name)   - 1);
+    strncpy(g_sem_w_name, sem_w_name, sizeof(g_sem_w_name) - 1);
+    strncpy(g_sem_r_name, sem_r_name, sizeof(g_sem_r_name) - 1);
+    g_owner = create;
+
+    printf("[ipc] initialisé (shm=%s, create=%d)\n", shm_name, create);
+    return 0;
 }
 
-mbai_game_state_t *ipc_get_state(ipc_context_t *context)
+/* ─────────────────────────────────────────────
+ * ipc_read_state
+ * Lit le GameState depuis la shm (protégé par sem_r)
+ * ───────────────────────────────────────────── */
+int ipc_read_state(GameState *out)
 {
-    if (context == NULL) {
-        errno = EINVAL;
-        return NULL;
-    }
+    if (!g_shm || !g_sem_r) return -1;
 
-    return context->state;
+    sem_wait(g_sem_r);                   /* attente si Python écrit   */
+    memcpy(out, g_shm, sizeof(GameState));
+    sem_post(g_sem_r);                   /* libère le sémaphore       */
+    return 0;
 }
 
-void ipc_close(ipc_context_t *context)
+/* ─────────────────────────────────────────────
+ * ipc_write_state
+ * Écrit un GameState dans la shm (protégé par sem_w)
+ * ───────────────────────────────────────────── */
+int ipc_write_state(const GameState *in)
 {
-    if (context == NULL) {
-        return;
-    }
+    if (!g_shm || !g_sem_w) return -1;
 
-    if (context->state != NULL) {
-        munmap(context->state, context->state_size);
-    }
-
-    if (context->shm_fd >= 0) {
-        close(context->shm_fd);
-    }
-
-    if (context->state_sem != NULL && context->state_sem != SEM_FAILED) {
-        sem_close(context->state_sem);
-    }
-
-    free(context);
+    sem_wait(g_sem_w);                   /* attente si Python lit     */
+    memcpy(g_shm, in, sizeof(GameState));
+    sem_post(g_sem_w);
+    return 0;
 }
 
-int ipc_unlink_all(void)
+/* ─────────────────────────────────────────────
+ * ipc_close
+ * ───────────────────────────────────────────── */
+void ipc_close(void)
 {
-    int status = 0;
-
-    if (shm_unlink(MBAI_SHM_NAME) != 0 && errno != ENOENT) {
-        status = -1;
+    if (g_shm && g_shm != MAP_FAILED) {
+        munmap(g_shm, sizeof(GameState));
+        g_shm = NULL;
+    }
+    if (g_shm_fd >= 0) {
+        close(g_shm_fd);
+        g_shm_fd = -1;
+    }
+    if (g_sem_w && g_sem_w != SEM_FAILED) {
+        sem_close(g_sem_w);
+        g_sem_w = NULL;
+    }
+    if (g_sem_r && g_sem_r != SEM_FAILED) {
+        sem_close(g_sem_r);
+        g_sem_r = NULL;
     }
 
-    if (sem_unlink(MBAI_STATE_SEM_NAME) != 0 && errno != ENOENT) {
-        status = -1;
+    /* Si on est le créateur, on supprime les ressources système */
+    if (g_owner) {
+        shm_unlink(g_shm_name);
+        sem_unlink(g_sem_w_name);
+        sem_unlink(g_sem_r_name);
+        printf("[ipc] ressources supprimées\n");
     }
-
-    return status;
 }

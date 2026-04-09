@@ -1,105 +1,145 @@
-#include <errno.h>
-#include <stdint.h>
+/*
+ * main.c — Point d'entrée du processus C réseau
+ *
+ * Usage :
+ *   ./c_net <mon_peer_id> <ip_pair1> [<ip_pair2> ...]
+ *
+ * Exemple (PC A = peer 0, PC B = peer 1) :
+ *   Sur PC A : ./c_net 0 192.168.1.2
+ *   Sur PC B : ./c_net 1 192.168.1.1
+ *
+ * Boucle principale (V1) :
+ *   1. Lit la shm (état Python local)
+ *   2. Pour chaque unité dirty → broadcast UDP aux pairs
+ *   3. Reçoit les messages UDP entrants → met à jour la shm
+ *   4. Attend ~16ms (≈ 60 Hz)
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
+#include <unistd.h>
 
 #include "ipc.h"
+#include "network.h"
+#include "protocol.h"
 
-static void fill_demo_unit(mbai_unit_state_t *unit)
+/* ─────────────────────────────────────────────
+ * Gestion du signal SIGINT (Ctrl+C)
+ * ───────────────────────────────────────────── */
+static volatile int g_running = 1;
+
+static void handle_sigint(int sig)
 {
-    unit->unit_id = 1u;
-    unit->x = 10.0f;
-    unit->y = 15.5f;
-    unit->hp = 35.0f;
-    unit->max_hp = 40.0f;
-    unit->unit_type = (uint8_t)MBAI_UNIT_KNIGHT;
-    unit->team_id = 'R';
-    unit->network_owner_peer = 1u;
-    unit->alive = 1u;
+    (void)sig;
+    printf("\n[main] Arrêt demandé...\n");
+    g_running = 0;
 }
 
-static void print_state(const mbai_game_state_t *state)
+/* ─────────────────────────────────────────────
+ * Envoi de toutes les unités dirty aux pairs
+ * ───────────────────────────────────────────── */
+static void broadcast_dirty_units(GameState *state)
 {
-    printf("magic=0x%08X version=%u units=%u\n",
-           state->magic,
-           (unsigned int)state->version,
-           (unsigned int)state->unit_count);
+    for (int i = 0; i < state->unit_count; i++) {
+        UnitState *u = &state->units[i];
 
-    if (state->unit_count == 0u) {
-        puts("no units");
-        return;
+        /* N'envoie que les unités qu'on possède ET qui ont changé */
+        if (u->dirty && u->owner_peer == state->my_peer_id) {
+            printf("[main] Envoi UDP de l'unité %d (dirty=1)...\n", u->id);
+            net_broadcast_state_update(u, state->my_peer_id);
+            u->dirty = 0;   /* acquitté localement */
+        }
+    }
+}
+
+/* ─────────────────────────────────────────────
+ * main
+ * ───────────────────────────────────────────── */
+int main(int argc, char *argv[])
+{
+    if (argc < 3) {
+        fprintf(stderr,
+            "Usage: %s <mon_peer_id> <ip_pair1> [<ip_pair2> ...]\n"
+            "Exemple: %s 0 192.168.1.2\n",
+            argv[0], argv[0]);
+        return 1;
     }
 
-    printf("unit0: id=%u type=%c team=%c pos=(%.1f, %.1f) hp=%.1f/%.1f owner=%u alive=%u\n",
-           (unsigned int)state->units[0].unit_id,
-           (char)state->units[0].unit_type,
-           (char)state->units[0].team_id,
-           state->units[0].x,
-           state->units[0].y,
-           state->units[0].hp,
-           state->units[0].max_hp,
-           (unsigned int)state->units[0].network_owner_peer,
-           (unsigned int)state->units[0].alive);
-}
+    uint8_t my_peer_id = (uint8_t)atoi(argv[1]);
+    printf("[main] Démarrage — peer_id=%d\n", my_peer_id);
 
-int main(int argc, char **argv)
-{
-    ipc_context_t *context = NULL;
-    mbai_game_state_t *state = NULL;
-    const char *mode = (argc > 1) ? argv[1] : "write-demo";
+    /* ── Initialisation IPC ─────────────────── */
+    /*
+     * create=0 : on suppose que Python a déjà créé la shm.
+     * create=1 : si on veut tester sans Python, mettre 1.
+     */
+    if (ipc_init(SHM_NAME, SEM_WRITE_NAME, SEM_READ_NAME, 1) < 0) {
+        fprintf(stderr, "[main] Erreur IPC (la shm Python est-elle lancée ?)\n");
+        return 1;
+    }
 
-    if (strcmp(mode, "cleanup") == 0) {
-        if (ipc_unlink_all() != 0) {
-            perror("ipc_unlink_all");
-            return EXIT_FAILURE;
+    /* ── Initialisation réseau ──────────────── */
+    if (net_init(NET_PORT) < 0) {
+        ipc_close();
+        return 1;
+    }
+
+    /* Enregistre chaque pair passé en argument */
+    for (int i = 2; i < argc; i++) {
+        uint8_t peer_id = (uint8_t)(i - 1); /* peer 1, 2, 3... */
+        if (net_add_peer(argv[i], NET_PORT, peer_id) < 0) {
+            fprintf(stderr, "[main] Impossible d'ajouter le pair %s\n", argv[i]);
+        }
+    }
+
+    /* ── Gestion de Ctrl+C ──────────────────── */
+    signal(SIGINT, handle_sigint);
+
+    /* ── Boucle principale V1 ───────────────── */
+    printf("[main] Boucle démarrée (Ctrl+C pour arrêter)\n");
+
+    GameState local_state;
+    NetMessage incoming;
+
+    while (g_running) {
+
+        /* 1. Lit l'état depuis la shm (écrit par Python) */
+        if (ipc_read_state(&local_state) < 0) {
+            fprintf(stderr, "[main] Erreur lecture shm\n");
+            break;
         }
 
-        puts("IPC objects removed.");
-        return EXIT_SUCCESS;
+        /* Garde my_peer_id cohérent (Python peut l'avoir mis) */
+        local_state.my_peer_id = my_peer_id;
+
+        /* 2. Envoie les unités modifiées sur le réseau */
+        broadcast_dirty_units(&local_state);
+
+        /* 3. Reçoit tous les messages disponibles (non-bloquant) */
+        int ret;
+        while ((ret = net_recv(&incoming)) == 1) {
+            proto_handle_incoming(&incoming, &local_state);
+        }
+        if (ret < 0) {
+            fprintf(stderr, "[main] Erreur réseau\n");
+            break;
+        }
+
+        /* 4. Réécrit l'état dans la shm (Python lira les updates réseau) */
+        if (ipc_write_state(&local_state) < 0) {
+            fprintf(stderr, "[main] Erreur écriture shm\n");
+            break;
+        }
+
+        /* 5. ~60 Hz */
+        usleep(16000);
     }
 
-    if (ipc_init(&context, 1u, 210u, 210u) != 0) {
-        perror("ipc_init");
-        return EXIT_FAILURE;
-    }
-
-    if (ipc_lock(context) != 0) {
-        perror("ipc_lock");
-        ipc_close(context);
-        return EXIT_FAILURE;
-    }
-
-    state = ipc_get_state(context);
-    if (state == NULL) {
-        perror("ipc_get_state");
-        ipc_unlock(context);
-        ipc_close(context);
-        return EXIT_FAILURE;
-    }
-
-    if (strcmp(mode, "write-demo") == 0) {
-        state->local_peer_id = 1u;
-        state->map_width = 210u;
-        state->map_height = 210u;
-        state->unit_count = 1u;
-        fill_demo_unit(&state->units[0]);
-        print_state(state);
-    } else if (strcmp(mode, "read") == 0) {
-        print_state(state);
-    } else {
-        fprintf(stderr, "unknown mode: %s\n", mode);
-        ipc_unlock(context);
-        ipc_close(context);
-        return EXIT_FAILURE;
-    }
-
-    if (ipc_unlock(context) != 0) {
-        perror("ipc_unlock");
-        ipc_close(context);
-        return EXIT_FAILURE;
-    }
-
-    ipc_close(context);
-    return EXIT_SUCCESS;
+    /* ── Nettoyage ──────────────────────────── */
+    printf("[main] Fermeture propre\n");
+    net_close();
+    ipc_close();
+    return 0;
 }

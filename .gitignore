@@ -45,5 +45,9 @@ bin/
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
-Makefile
 compile_commands.json
+
+# C — fichiers générés par le Makefile
+c_network/*.o
+c_network/c_net
+c_network/test_ipc

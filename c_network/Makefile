@@ -1,30 +1,48 @@
-CC ?= gcc
-CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic -I. -I../shared
-LDFLAGS ?=
-LDLIBS ?= -pthread
+# Makefile — Processus C réseau (V1)
+# Compilation sous Linux / WSL uniquement (POSIX shm + sémaphores)
 
-TARGET := mbai_ipc_test
-SRCS := main.c ipc.c
-OBJS := $(SRCS:.c=.o)
+CC      = gcc
+CFLAGS  = -Wall -Wextra -g -I../shared
+LDFLAGS = -lrt -lpthread
 
-.PHONY: all clean run cleanup test
+# Sources
+SRCS = main.c ipc.c network.c protocol.c
+OBJS = $(SRCS:.c=.o)
+TARGET = c_net
 
-all: $(TARGET)
+# ─────────────────────────────────────────────
+# Cibles
+# ─────────────────────────────────────────────
+
+all: $(TARGET) test_ipc
 
 $(TARGET): $(OBJS)
-	$(CC) $(OBJS) $(LDFLAGS) $(LDLIBS) -o $@
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "✓ Compilé : ./$(TARGET)"
+
+test_ipc: test_ipc.o ipc.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "✓ Compilé : ./test_ipc"
 
 %.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-run: $(TARGET)
-	./$(TARGET)
-
-cleanup: $(TARGET)
-	./$(TARGET) cleanup
-
-test:
-	bash ../scripts/test_network.sh
-
+# Nettoyage
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(OBJS) test_ipc.o $(TARGET) test_ipc
+	@echo "✓ Nettoyé"
+
+# Nettoyage des ressources IPC zombies (si le process a crashé)
+clean-ipc:
+	-rm -f /dev/shm/battle_state
+	-rm -f /dev/shm/sem.battle_sem_w
+	-rm -f /dev/shm/sem.battle_sem_r
+	@echo "✓ Ressources IPC supprimées"
+
+# Lance un test standalone (sans Python)
+# Crée la shm, écrit un GameState factice, le ré-affiche
+test-ipc: $(TARGET)
+	@echo "Test IPC : écriture puis lecture de la shm..."
+	./test_ipc
+
+.PHONY: all clean clean-ipc test-ipc
