@@ -278,6 +278,8 @@ class Engine:
                 # 5 mets a jour les unités
                 self.update_units(1 / 60)
                 self.update_projectiles()
+                if self.is_distributed:
+                    self.push_local_state()
                 # 5. Contrôle du turn rate
                 self.turn_time = time.time() - turn_start
                 if self.view and self.turn_time < max_turn_time:
@@ -378,15 +380,12 @@ class Engine:
         # 0. Synchronisation entrante (mises à jour distantes via thread network_bridge)
         red_alive = 0
         blue_alive = 0
-        state_changed = False
         
         for unit in self.units:
             if not unit.is_alive:
                 continue
             
             # Stockage de l'état précédent pour détection de changement
-            prev_pos = unit.position
-            prev_hp = unit.current_hp
             
             if unit.team == 'R':
                 red_alive += 1
@@ -398,13 +397,8 @@ class Engine:
                     self.ia2.play_turn(unit, self.current_turn)
             
             # Détection de changement d'état (mouvement ou combat)
-            if self.is_distributed:
-                if (unit.team == self.local_team) and (unit.position != prev_pos or unit.current_hp != prev_hp):
-                    state_changed = True
 
         # Objective 2 : Immediate update broadcast on local change
-        if self.is_distributed and state_changed:
-            self.push_local_state()
 
         # Enregistre l'historique pour Lanchester (tous les 10 tours pour ne pas trop alourdir)
         if "lanchester" in self.scenario_name.lower() and self.current_turn % 10 == 0:
@@ -436,9 +430,15 @@ class Engine:
                 existing.position = (u["x"], u["y"])
                 existing.current_hp = u["hp"]
                 existing.is_alive = existing.current_hp > 0
-                if not existing.is_alive:
-                    existing.state = 'dead'
+                existing.direction = (0, 0)
+                existing.destination = None
+                existing.target = None
+                existing.time_until_next_attack = 0
+                existing.time_before_next_attack = existing.attack_delay
+                existing.state = 'idle' if existing.is_alive else 'dead'
             else:
+                # Facultatif pour V1: ajouter l'unit? si elle n'existe pas
+                pass
                 # Facultatif pour V1: ajouter l'unité si elle n'existe pas
                 pass
 
