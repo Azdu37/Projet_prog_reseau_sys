@@ -27,10 +27,10 @@ La cohérence est garantie par un mécanisme de **propriété réseau cessible**
 
 ## Architecture
 
-Le projet impose **deux processus séparés** communiquant via IPC :
+Le projet impose **deux processus séparés** communiquant via UDP :
 
 ```
-┌─────────────────────┐         IPC (SHM + sém.)         ┌──────────────────────┐
+┌─────────────────────┐               UDP                ┌──────────────────────┐
 │   Processus Python  │ ◄──────────────────────────────► │   Processus C        │
 │                     │                                   │                      │
 │  • Moteur de jeu    │                                   │  • Sockets réseau    │
@@ -61,12 +61,15 @@ Le projet impose **deux processus séparés** communiquant via IPC :
 │
 ├── c_network/                 # Processus C — réseau & IPC
 │   ├── Makefile
+│   ├── README.md              # Documentation propre au module réseau C
 │   ├── main.c                 # Point d'entrée du processus C
 │   ├── ipc.c / ipc.h          # Mémoire partagée POSIX + sémaphore
 │   ├── network.c / network.h  # Sockets réseau (UDP/TCP)
-│   └── protocol.c / protocol.h# Sérialisation des messages réseau
+│   ├── protocol.c / protocol.h# Sérialisation des messages réseau
+│   └── test_ipc.c             # Code de test de la communication inter-processus (IPC)
 │
 ├── p_game/                    # Processus Python — jeu & IA
+│   ├── README.md              # Documentation propre au jeu Python
 │   ├── main.py                # Point d'entrée du jeu
 │   ├── shared_state.py        # Miroir Python des structures C (ctypes)
 │   ├── network_bridge.py      # Pont Python vers la mémoire partagée
@@ -78,13 +81,17 @@ Le projet impose **deux processus séparés** communiquant via IPC :
 │   │   └── scenario.py        # Chargement des scénarios
 │   ├── ia/                    # IAs disponibles
 │   │   ├── base_general.py    # Classe mère de toutes les IAs
+│   │   ├── registry.py        # Registre pour le chargement dynamique des IAs
 │   │   ├── smart_ia.py        # IA avancée
 │   │   ├── basic_ia.py        # IA basique
-│   │   └── ...                # Autres IAs
+│   │   └── ...                # Autres IAs (daft, brain_dead, tacticus, strategus...)
+│   ├── scenario_generator/    # Générateur de scénarios customisés
+│   │   └── scenario_maker.py  # Script de génération de scénarios
+│   ├── reports/               # Rapports de bataille générés
 │   ├── visuals/               # Affichage
 │   │   ├── gui_view.py        # Vue graphique 2.5D (Pygame)
 │   │   └── terminal_view.py   # Vue ASCII terminal
-│   └── data/                  # Assets (sprites, scénarios, sauvegardes)
+│   └── data/                  # Assets (sprites, statistiques, sauvegardes)
 │
 └── scripts/                   # Scripts utilitaires
     ├── launch.sh              # Lancement des deux processus
@@ -156,7 +163,11 @@ bash scripts/test_network.sh
 ### Lancement réseau (2 joueurs)
 
 ```bash
-# À venir — via scripts/launch.sh
+# Exemple pour le poste 1 (Équipe Rouge) :
+bash scripts/launch.sh run stest6 smartia majordaft --distributed --local-team R --p2p-port 5555 --peer <IP_POSTE_2>:5556
+
+# Exemple pour le poste 2 (Équipe Bleue) :
+bash scripts/launch.sh run stest6 smartia majordaft --distributed --local-team B --p2p-port 5556 --peer <IP_POSTE_1>:5555
 ```
 
 ---
