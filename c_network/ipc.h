@@ -1,35 +1,58 @@
-#ifndef MBAI_IPC_H
-#define MBAI_IPC_H
-
-/* Shared-memory IPC between the local C runtime and the Python engine. */
-
-#include <stdint.h>
-
-#include "protocol.h"
-
-typedef struct ipc_context_s ipc_context_t;
+#ifndef IPC_H
+#define IPC_H
 
 /*
- * Create or attach to the shared battle snapshot and its synchronization
- * semaphore. The function allocates the context and returns it through
- * out_context.
+ * ipc.h — Interface de communication entre Python et le processus C
+ *
+ * La mémoire partagée contient un GameState.
+ * Python y écrit l'état du jeu, le C le lit pour l'envoyer en réseau.
+ * Le C y écrit les mises à jour reçues du réseau, Python les lit.
+ *
+ * Synchronisation : deux sémaphores POSIX (un par sens d'écriture).
  */
-int ipc_init(ipc_context_t **out_context,
-             uint32_t local_peer_id,
-             uint32_t map_width,
-             uint32_t map_height);
 
-/* Enter or leave the critical section protecting the shared snapshot. */
-int ipc_lock(ipc_context_t *context);
-int ipc_unlock(ipc_context_t *context);
+#include "../shared/protocol.h"
 
-/* Return the mapped shared state owned by the context. */
-mbai_game_state_t *ipc_get_state(ipc_context_t *context);
+/* ─────────────────────────────────────────────
+ * Initialisation / fermeture
+ * ───────────────────────────────────────────── */
 
-/* Unmap/close local resources for the context. Safe to call once. */
-void ipc_close(ipc_context_t *context);
+/**
+ * ipc_init - Ouvre (ou crée) la mémoire partagée et les sémaphores.
+ *
+ * @param shm_name      Nom du segment shm  (ex: SHM_NAME)
+ * @param sem_w_name    Nom du sémaphore write (ex: SEM_WRITE_NAME)
+ * @param sem_r_name    Nom du sémaphore read  (ex: SEM_READ_NAME)
+ * @param create        1 = créer + initialiser, 0 = juste ouvrir
+ * @return 0 si succès, -1 si erreur (errno positionné)
+ */
+int ipc_init(const char *shm_name,
+             const char *sem_w_name,
+             const char *sem_r_name,
+             int create);
 
-/* Remove the named semaphore and shared memory object from the system. */
-int ipc_unlink_all(void);
+/**
+ * ipc_close - Détache la mémoire partagée et ferme les sémaphores.
+ *             Si create=1 à l'init, supprime aussi les ressources.
+ */
+void ipc_close(void);
 
-#endif /* MBAI_IPC_H */
+/* ─────────────────────────────────────────────
+ * Lecture / écriture thread-safe
+ * ───────────────────────────────────────────── */
+
+/**
+ * ipc_read_state - Copie le GameState de la shm dans *out*.
+ *                  Protégé par le sémaphore sem_read.
+ * @return 0 si succès, -1 si erreur
+ */
+int ipc_read_state(GameState *out);
+
+/**
+ * ipc_write_state - Copie *in* dans la shm.
+ *                   Protégé par le sémaphore sem_write.
+ * @return 0 si succès, -1 si erreur
+ */
+int ipc_write_state(const GameState *in);
+
+#endif /* IPC_H */

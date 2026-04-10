@@ -1,71 +1,70 @@
-#ifndef MBAI_SHARED_PROTOCOL_H
-#define MBAI_SHARED_PROTOCOL_H
+#ifndef PROTOCOL_H
+#define PROTOCOL_H
 
-/*
- * Minimal shared protocol for the v1 IPC bridge.
- *
- * Keep this file simple:
- * - fixed-size arrays only
- * - no pointers
- * - only the fields needed to mirror units and ownership
- */
-
-#include <stddef.h>
 #include <stdint.h>
 
-#if defined(__cplusplus)
-#define MBAI_STATIC_ASSERT(cond, msg) static_assert((cond), msg)
-#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
-#define MBAI_STATIC_ASSERT(cond, msg) _Static_assert((cond), msg)
-#else
-#define MBAI_STATIC_ASSERT(cond, msg)
-#endif
+/* ─────────────────────────────────────────────
+ * Constantes globales
+ * ───────────────────────────────────────────── */
+#define PROTOCOL_MAGIC   0xBABA1234u
+#define PROTOCOL_VERSION 1
 
-#define MBAI_PROTOCOL_MAGIC   0x4D424149u  /* "MBAI" */
-#define MBAI_PROTOCOL_VERSION 1u
+#define MAX_UNITS        64
+#define MAX_PEERS        8
 
-#define MBAI_SHM_NAME         "/mbai_game_state"
-#define MBAI_STATE_SEM_NAME   "/mbai_state_sem"
+/* Noms IPC (mémoire partagée + sémaphore) */
+#define SHM_NAME         "/battle_state"
+#define SEM_WRITE_NAME   "/battle_sem_w"   /* Python écrit, C lit   */
+#define SEM_READ_NAME    "/battle_sem_r"   /* C écrit, Python lit   */
 
-#define MBAI_MAX_UNITS        1024u
-#define MBAI_NO_PEER          0xFFu
+/* Port UDP par défaut */
+#define NET_PORT         9000
 
-#define MBAI_UNIT_UNKNOWN     0u
-#define MBAI_UNIT_CROSSBOW    'C'
-#define MBAI_UNIT_KNIGHT      'K'
-#define MBAI_UNIT_LIGHT_CAVALRY 'L'
-#define MBAI_UNIT_PIKEMAN     'P'
-#define MBAI_UNIT_SKIRMISHER  'S'
+/* ─────────────────────────────────────────────
+ * État d'une unité (une case / personnage)
+ * ───────────────────────────────────────────── */
+typedef struct {
+    uint8_t  id;           /* identifiant unique de l'unité          */
+    uint8_t  team;         /* 0 = équipe A, 1 = équipe B, ...        */
+    uint8_t  owner_peer;   /* index du PC propriétaire (V2)          */
+    uint8_t  alive;        /* 1 = vivant, 0 = mort                   */
+    uint8_t  dirty;        /* 1 = modifié, à envoyer sur le réseau   */
+    uint8_t  _pad[3];      /* alignement 8 octets                    */
+    float    x;            /* position X                             */
+    float    y;            /* position Y                             */
+    uint16_t hp;           /* points de vie                          */
+    uint16_t hp_max;       /* points de vie maximum                  */
+} UnitState;               /* taille = 20 octets                     */
 
-typedef struct mbai_unit_state_s {
-    uint32_t unit_id;
-    float x;
-    float y;
-    float hp;
-    float max_hp;
-    uint8_t unit_type;
-    uint8_t team_id;
-    uint8_t network_owner_peer;
-    uint8_t alive;
-} mbai_unit_state_t;
+/* ─────────────────────────────────────────────
+ * État global du jeu (dans la mémoire partagée)
+ * ───────────────────────────────────────────── */
+typedef struct {
+    uint32_t  magic;                /* PROTOCOL_MAGIC : détecte corruption  */
+    uint16_t  version;              /* PROTOCOL_VERSION                      */
+    uint8_t   unit_count;           /* nombre d'unités actives               */
+    uint8_t   my_peer_id;           /* index de ce PC dans la partie         */
+    uint32_t  tick;                 /* horloge logique du jeu                */
+    uint8_t   _pad[4];
+    UnitState units[MAX_UNITS];     /* tableau d'unités                      */
+} GameState;
 
-typedef struct mbai_game_state_s {
-    uint32_t magic;
-    uint32_t version;
-    uint32_t header_size;
-    uint32_t total_size;
-    uint32_t unit_count;
-    uint32_t max_units;
-    uint32_t map_width;
-    uint32_t map_height;
-    uint32_t local_peer_id;
-    mbai_unit_state_t units[MBAI_MAX_UNITS];
-} mbai_game_state_t;
+/* ─────────────────────────────────────────────
+ * Messages réseau (envoyés en UDP entre les C)
+ * ───────────────────────────────────────────── */
+typedef enum {
+    MSG_STATE_UPDATE = 1,   /* V1 : mise à jour d'une unité          */
+    MSG_OWN_REQUEST  = 2,   /* V2 : demande de propriété             */
+    MSG_OWN_GRANT    = 3,   /* V2 : propriété accordée               */
+    MSG_OWN_DENY     = 4,   /* V2 : propriété refusée                */
+} MsgType;
 
-MBAI_STATIC_ASSERT(sizeof(mbai_unit_state_t) == 24u, "mbai_unit_state_t size mismatch");
-MBAI_STATIC_ASSERT(offsetof(mbai_game_state_t, units) == 36u, "mbai_game_state_t header size mismatch");
-MBAI_STATIC_ASSERT(sizeof(mbai_game_state_t) == (24u * MBAI_MAX_UNITS + 36u), "mbai_game_state_t size mismatch");
+typedef struct {
+    uint32_t  magic;        /* PROTOCOL_MAGIC                        */
+    uint8_t   type;         /* MsgType                               */
+    uint8_t   sender_id;    /* index du PC émetteur                  */
+    uint16_t  unit_id;      /* unité concernée                       */
+    UnitState unit;         /* payload (utilisé pour STATE_UPDATE)   */
+} NetMessage;
 
-#undef MBAI_STATIC_ASSERT
-
-#endif /* MBAI_SHARED_PROTOCOL_H */
+#endif /* PROTOCOL_H */
