@@ -63,11 +63,13 @@ echo "║                                                             ║"
 echo "╚═════════════════════════════════════════════════════════════╝"
 echo ""
 
-# ── Étape 1 : Compilation ────────────────────────────────────────────────────
-echo "▶ [1/3] Compilation de la route réseau C..."
+# ── Étape 1 : Nettoyage & Compilation ───────────────────────────────────────
+echo "▶ [1/3] Préparation de la route réseau C..."
 cd "$ROOT/c_network"
+make clean-ipc -s > /dev/null 2>&1 || true
+make clean -s > /dev/null 2>&1 || true
 make c_net -s
-echo "  ✓ C compilé avec succès."
+echo "  ✓ C compilé avec succès (RAM purgée)."
 
 # ── Étape 2 : Lancement de c_net ────────────────────────────────────────────
 echo ""
