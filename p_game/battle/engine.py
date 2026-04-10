@@ -274,12 +274,13 @@ class Engine:
                 # 3. Mettre à jour les unités et projectiles
                 self.update_units(1 / 60)
                 self.update_projectiles()
-                # 4. Vérifier les conditions de victoire (après mise à jour des morts)
-                self.check_victory()
-                # 5. Passer au tour suivant
-                self.current_turn += 1
+                # 4. Échange réseau (envoyer notre état + recevoir l'état distant)
                 if self.is_distributed:
-                    self.push_local_state()
+                    self.network_exchange()
+                # 5. Vérifier les conditions de victoire (après réseau)
+                self.check_victory()
+                # 6. Passer au tour suivant
+                self.current_turn += 1
                 # 5. Contrôle du turn rate
                 self.turn_time = time.time() - turn_start
                 if self.view and self.turn_time < max_turn_time:
@@ -408,39 +409,10 @@ class Engine:
         
         pass
 
-    def push_local_state(self):
-        """Diffuser l'état local via le pont réseau"""
+    def network_exchange(self):
+        """Échange réseau : envoie notre état + reçoit l'état distant via SHM/C/UDP."""
         import network_bridge
-        network_bridge.push_local_update(self)
-
-    def apply_remote_update(self, state):
-        """Version 1: overwrite remote units with received values. No conflict resolution."""
-        if not isinstance(state, dict) or "units" not in state:
-            return
-
-        for u in state["units"]:
-            # Ne pas appliquer si on est l'owner (déjà mis à jour localement)
-            # player_id: R=0, B=1
-            my_id = 0 if self.local_team == 'R' else (1 if self.local_team == 'B' else -1)
-            if u["owner_id"] == my_id and my_id != -1:
-                continue
-
-            existing = self.find_unit(u["unit_id"])
-            if existing:
-                existing.position = (u["x"], u["y"])
-                existing.current_hp = u["hp"]
-                existing.is_alive = existing.current_hp > 0
-                existing.direction = (0, 0)
-                existing.destination = None
-                existing.target = None
-                existing.time_until_next_attack = 0
-                existing.time_before_next_attack = existing.attack_delay
-                existing.state = 'idle' if existing.is_alive else 'dead'
-            else:
-                # Facultatif pour V1: ajouter l'unit? si elle n'existe pas
-                pass
-                # Facultatif pour V1: ajouter l'unité si elle n'existe pas
-                pass
+        network_bridge.exchange_state(self)
 
     def request_network_ownership(self, unit):
         """Demande la propriété réseau d'une unité (protocole de cohérence rudimentaire)."""

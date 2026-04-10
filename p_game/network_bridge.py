@@ -1,11 +1,17 @@
 # network_bridge.py
-# Modifié pour utiliser la mémoire partagée POSIX (ctypes) en synchro parfaite avec le C.
+# V2 — Échange atomique Python ↔ SHM (sans thread listener)
+#
+# Principe :
+#   exchange_state() est appelé à chaque tick du game loop.
+#   1. Lit la SHM (contient les mises à jour réseau écrites par C)
+#   2. Applique les updates distantes aux unités Python
+#   3. Écrit l'état local Python dans la SHM pour que C l'envoie
+#
+# Plus de thread, plus de race conditions.
 
 import ctypes
 import os
-import threading
 import time
-from typing import Callable
 
 # ── Constantes correspondantes au protocole C ────────────────────────────────
 PROTOCOL_MAGIC   = 0xBABA1234
@@ -41,7 +47,7 @@ _MAP_SHARED = 0x01
 _SEM_FAILED = ctypes.c_void_p(-1).value
 _MAP_FAILED = ctypes.c_void_p(-1).value
 
-# ── Structures Ctypes ────────────────────────────────────────────────────────
+# ── Structures Ctypes (DOIT correspondre EXACTEMENT à shared/protocol.h) ────
 class UnitState(ctypes.Structure):
     _fields_ = [
         ("id",         ctypes.c_uint8),
@@ -75,7 +81,7 @@ class POSIXBridge:
         self._sem_w = None
         self._sem_r = None
         self._map_addr = None
-        self._state: GameStateC | None = None
+        self._state = None
 
     def connecter(self, tentatives=30, delai=0.2):
         fd = -1
@@ -97,9 +103,9 @@ class POSIXBridge:
         self._fd = fd
         self._map_addr = map_addr
         self._state = ctypes.cast(map_addr, ctypes.POINTER(GameStateC)).contents
-        print(f"[bridge] Connecté avec succès à la mémoire partagée (peer_id={self.my_peer_id})")
+        print(f"[bridge] Connecté à la SHM (peer_id={self.my_peer_id})")
 
-    def ecrire(self, snapshot: GameStateC):
+    def ecrire(self, snapshot):
         if not self._state: return
         libc.sem_wait(self._sem_w)
         try:
@@ -107,8 +113,8 @@ class POSIXBridge:
         finally:
             libc.sem_post(self._sem_w)
 
-    def lire(self) -> GameStateC:
-        if not self._state: raise RuntimeError()
+    def lire(self):
+        if not self._state: raise RuntimeError("SHM non connectée")
         out = GameStateC()
         libc.sem_wait(self._sem_r)
         try:
@@ -124,105 +130,129 @@ class POSIXBridge:
         if self._fd >= 0: libc.close(self._fd)
 
 
-# ── INSTANCE GLOBALE ET API CONFORTE ──────────────────────────────────────────
+# ── INSTANCE GLOBALE ──────────────────────────────────────────────────────────
+_bridge = None
 
-_bridge: POSIXBridge | None = None
-_running: bool = False
-
-def init(player_id: int, **kwargs) -> None:
+def init(player_id: int) -> None:
     """Appelé par main.py pour s'accrocher à la mémoire IPC POSIX du ./c_net."""
     global _bridge
     _bridge = POSIXBridge(my_peer_id=player_id)
     try:
         _bridge.connecter()
     except Exception as e:
-        print(f"Erreur de connexion IPC : {e}")
+        print(f"[bridge] Erreur de connexion IPC : {e}")
         _bridge = None
 
-def push_local_update(game_state) -> None:
-    """Convertit l'état Python en struct C et l'écrit dans la SHM."""
-    if not _bridge: return
+
+def exchange_state(engine) -> None:
+    """
+    Échange atomique avec la SHM — appelé chaque tick du game loop.
+    
+    1. Lit la SHM (mises à jour réseau écrites par le processus C)
+    2. Applique les updates distantes aux unités Python
+    3. Écrit l'état Python dans la SHM pour que C l'envoie en UDP
+    """
+    if not _bridge:
+        return
+
+    my_peer = _bridge.my_peer_id
 
     try:
         c_state = _bridge.lire()
     except Exception:
-        c_state = GameStateC()
+        return
 
+    units = list(engine.all_units())[:MAX_UNITS]
+    
+    # ── PHASE 1 : Lire les mises à jour du réseau depuis la SHM ──────────
+    for unit in units:
+        uid = unit.unit_id
+        if uid >= MAX_UNITS:
+            continue
+
+        slot = c_state.units[uid]
+        
+        # Slot pas encore initialisé par le réseau → ignorer
+        if slot.hp_max == 0:
+            continue
+        
+        owner = unit.owner_id  # 0=R, 1=B
+
+        if owner == my_peer:
+            # ── NOTRE unité ──
+            # Accepter uniquement les baisses de HP (dégâts infligés par l'adversaire)
+            if slot.hp < unit.current_hp and slot.hp >= 0:
+                unit.current_hp = slot.hp
+                unit.get_hit = 0.2
+                if unit.current_hp <= 0:
+                    unit.current_hp = 0
+                    unit.is_alive = False
+                    unit.state = "dead"
+                    unit.target = None
+        else:
+            # ── UNITÉ DISTANTE ──
+            # Mettre à jour la position (l'adversaire la contrôle)
+            unit.position = (slot.x, slot.y)
+            
+            # Mettre à jour HP : accepter les baisses
+            # (soit l'adversaire a pris des dégâts de notre part, soit d'un autre)
+            if slot.hp < unit.current_hp:
+                unit.current_hp = slot.hp
+                unit.get_hit = 0.2
+            
+            # Mettre à jour l'état mort
+            if slot.alive == 0 or slot.hp <= 0:
+                unit.current_hp = 0
+                unit.is_alive = False
+                unit.state = "dead"
+                unit.target = None
+
+    # ── PHASE 2 : Écrire l'état Python dans la SHM pour le C ──────────────
     c_state.magic = PROTOCOL_MAGIC
     c_state.version = PROTOCOL_VERSION
-    c_state.my_peer_id = _bridge.my_peer_id
-    
-    units = list(game_state.all_units())[:MAX_UNITS]
+    c_state.my_peer_id = my_peer
     c_state.unit_count = len(units)
 
-    for i, u in enumerate(units):
-        uid = int(u.unit_id if hasattr(u, 'unit_id') else i)
-        owner = int(u.owner_id if hasattr(u, 'owner_id') else _bridge.my_peer_id)
-        
-        # UNIQUEMENT si on est propriétaire, on écrase les données dans la RAM !
-        # Ou si l'unité est encore vide (init).
-        if owner == _bridge.my_peer_id or c_state.units[i].hp_max == 0:
-            c_state.units[i].id = uid
-            c_state.units[i].team = owner
-            c_state.units[i].owner_peer = owner
-            c_state.units[i].x = float(u.position[0])
-            c_state.units[i].y = float(u.position[1])
-            c_state.units[i].hp = int(u.current_hp)
-            c_state.units[i].hp_max = int(getattr(u, 'max_hp', 100))
-            c_state.units[i].alive = 1 if c_state.units[i].hp > 0 else 0
-            c_state.units[i].dirty = 1
+    for unit in units:
+        uid = unit.unit_id
+        if uid >= MAX_UNITS:
+            continue
+
+        slot = c_state.units[uid]
+        owner = unit.owner_id  # 0=R, 1=B
+
+        # Toujours écrire l'identifiant et les stats fixes
+        slot.id = uid
+        slot.team = owner
+        slot.owner_peer = owner
+        slot.hp_max = int(unit.max_hp)
+        slot.alive = 1 if unit.is_alive else 0
+
+        if owner == my_peer:
+            # ── NOTRE unité : envoyer position + HP complet ──
+            slot.x = float(unit.position[0])
+            slot.y = float(unit.position[1])
+            slot.hp = int(unit.current_hp)
+            slot.dirty = 1  # Toujours envoyer
         else:
-            # L'unité appartient au réseau, on la relit de la SHM, on ne la modifie pas !
-            # Et son dirty restera à 0 pour ne pas la re-broadcaster
-            c_state.units[i].dirty = 0
+            # ── UNITÉ DISTANTE : envoyer seulement si on l'a endommagée ──
+            python_hp = int(unit.current_hp)
+            if python_hp < slot.hp:
+                # On a infligé des dégâts → écrire le nouveau HP et marquer dirty
+                slot.hp = python_hp
+                slot.alive = 1 if python_hp > 0 else 0
+                slot.dirty = 1
+            else:
+                # Pas de changement de notre part → ne pas renvoyer
+                slot.dirty = 0
 
-    _bridge.ecrire(c_state)
-
-
-def start_listener(apply_callback: Callable) -> None:
-    """Lit très régulièrement la mémoire C pour informer le jeu Python des nouveautés UDP."""
-    global _running
-    if not _bridge: return
-    _running = True
-
-    def _loop():
-        while _running:
-            try:
-                recv = _bridge.lire()
-                
-                # Reformate en dictionnaire pour apply_remote_update() du jeu originel
-                remote_units = []
-                for i in range(recv.unit_count):
-                    u = recv.units[i]
-                    if u.owner_peer != _bridge.my_peer_id:
-                        remote_units.append({
-                            "unit_id": u.id,
-                            "owner_id": u.owner_peer,
-                            "x": u.x,
-                            "y": u.y,
-                            "hp": u.hp
-                        })
-                
-                if remote_units:
-                    msg = {
-                        "msg_type": 1,
-                        "sender_id": -1,
-                        "timestamp_ms": int(time.time()*1000),
-                        "units": remote_units
-                    }
-                    apply_callback(msg)
-
-                time.sleep(0.016) # ~60 Hz
-            except Exception as e:
-                # La SHM a été fermée / c_net stoppé ?
-                break
-
-    t = threading.Thread(target=_loop, daemon=True)
-    t.start()
+    try:
+        _bridge.ecrire(c_state)
+    except Exception:
+        pass
 
 
 def shutdown() -> None:
-    global _running
-    _running = False
+    """Ferme la connexion SHM."""
     if _bridge:
         _bridge.fermer()
