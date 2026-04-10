@@ -160,15 +160,13 @@ class Engine:
                 if self.ia1_name not in AI_REGISTRY:
                     raise ValueError(f"IA '{self.ia1_name}' non reconnue.")
                 self.ia1 = AI_REGISTRY[self.ia1_name]("R", self.game_map)
-                # IA distante remplacée par une IA inerte mais affichage du vrai nom
+                # IA distante remplacée par une IA inerte (contrôle via réseau)
                 self.ia2 = AI_REGISTRY.get('braindead')("B", self.game_map)
-                self.ia2.name = self.ia2_name
             elif self.local_team == 'B':
                 if self.ia2_name not in AI_REGISTRY:
                     raise ValueError(f"IA '{self.ia2_name}' non reconnue.")
                 self.ia2 = AI_REGISTRY[self.ia2_name]("B", self.game_map)
                 self.ia1 = AI_REGISTRY.get('braindead')("R", self.game_map)
-                self.ia1.name = self.ia1_name
             else:
                 raise ValueError(f"Équipe locale '{self.local_team}' invalide en mode réparti.")
         else:
