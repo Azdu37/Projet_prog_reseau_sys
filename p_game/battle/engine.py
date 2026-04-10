@@ -125,7 +125,8 @@ class Engine:
             else:
                 u.is_local = True
                 u.network_owner = u.team
-            u.owner_id = 1 if u.team == 'R' else 2
+            # 0=R, 1=B
+            u.owner_id = 0 if u.team == 'R' else 1
             self.units.append(u)
 
     def all_units(self):
@@ -425,9 +426,9 @@ class Engine:
 
         for u in state["units"]:
             # Ne pas appliquer si on est l'owner (déjà mis à jour localement)
-            # player_id: R=1, B=2
-            my_id = 1 if self.local_team == 'R' else (2 if self.local_team == 'B' else 0)
-            if u["owner_id"] == my_id and my_id != 0:
+            # player_id: R=0, B=1
+            my_id = 0 if self.local_team == 'R' else (1 if self.local_team == 'B' else -1)
+            if u["owner_id"] == my_id and my_id != -1:
                 continue
 
             existing = self.find_unit(u["unit_id"])

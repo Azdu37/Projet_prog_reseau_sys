@@ -85,21 +85,14 @@ class BattleCLI:
                         local_team=args.local_team)
         
         if args.distributed:
-            # 1. Start C network process
-            player_id = 1 if args.local_team == 'R' else (2 if args.local_team == 'B' else 0)
-            peers = args.peer if args.peer else ""
-            c_proc = subprocess.Popen([
-                "../c_network/build/network",
-                "--id",    str(player_id),
-                "--peers", peers,
-                "--p2p-port", str(args.p2p_port),
-            ])
+            # 0=ROUGE, 1=BLEU (comme pour le programme C)
+            player_id = 0 if args.local_team == 'R' else (1 if args.local_team == 'B' else 0)
             
-            # 2. Init network bridge
+            # 2. Init network bridge (POSIX)
             network_bridge.init(player_id)
             network_bridge.start_listener(engine.apply_remote_update)
             
-            print(f"[NETWORK] C process started (PID={c_proc.pid})")
+            print(f"[NETWORK] Bridge initialisé (peer_id={player_id})")
             time.sleep(0.3)
 
         try:
@@ -107,8 +100,6 @@ class BattleCLI:
         finally:
             if args.distributed:
                 network_bridge.shutdown()
-                c_proc.terminate()
-                c_proc.wait()
 
     def cmd_load(self, args):
         # Implémentation simplifiée du chargement
