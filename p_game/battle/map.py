@@ -240,6 +240,7 @@ class Map:
             next_pos = (next_x, next_y)
             self.maj_unit_posi(unit, next_pos)
 
+            unit.state = "moving"
             unit.direction = (dir_x, dir_y)  # mettre a jour la direction
             if depth == 0:
                 angle = atan2(dir_y, dir_x) + 3.15
@@ -466,14 +467,14 @@ class Map:
 
     def update_projectiles(self):
         """checks for hits. if none, continues trajectory"""
-        projectiles = self.projectiles
+        projectiles_to_remove = []
 
-        for projectile in projectiles:
+        for projectile in self.projectiles:
 
             # Calcul de déplacement
             if self.hit(projectile) or projectile.travel_dist >= projectile.range:
-                self.destroy_projectile(projectile)
-                return None
+                projectiles_to_remove.append(projectile)
+                continue
 
             x_step = projectile.speed * projectile.direction[0] / 60
             y_step = projectile.speed * projectile.direction[1] / 60
@@ -483,6 +484,9 @@ class Map:
 
             next_pos = (next_x, next_y)
             self.maj_proj_posi(projectile, next_pos)
+
+        for proj in projectiles_to_remove:
+            self.destroy_projectile(proj)
 
     def destroy_projectile(self, projectile):
         self.projectiles.remove(projectile)

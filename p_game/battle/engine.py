@@ -271,13 +271,13 @@ class Engine:
                 if turn_start >= next_view_time and self.view_type > 0:
                     next_view_time = turn_start + view_frame_time
                     self.update_view()
-                # 3. Vérifier les conditions de victoire
-                self.check_victory()
-                # 4. Passer au tour suivant
-                self.current_turn += 1
-                # 5 mets a jour les unités
+                # 3. Mettre à jour les unités et projectiles
                 self.update_units(1 / 60)
                 self.update_projectiles()
+                # 4. Vérifier les conditions de victoire (après mise à jour des morts)
+                self.check_victory()
+                # 5. Passer au tour suivant
+                self.current_turn += 1
                 if self.is_distributed:
                     self.push_local_state()
                 # 5. Contrôle du turn rate
