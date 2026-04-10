@@ -10,7 +10,7 @@ from typing import Callable
 # ── Constantes correspondantes au protocole C ────────────────────────────────
 PROTOCOL_MAGIC   = 0xBABA1234
 PROTOCOL_VERSION = 1
-MAX_UNITS        = 64
+MAX_UNITS        = 256
 SHM_NAME         = "/battle_state"
 SEM_WRITE_NAME   = "/battle_sem_w"
 SEM_READ_NAME    = "/battle_sem_r"
@@ -143,7 +143,11 @@ def push_local_update(game_state) -> None:
     """Convertit l'état Python en struct C et l'écrit dans la SHM."""
     if not _bridge: return
 
-    c_state = GameStateC()
+    try:
+        c_state = _bridge.lire()
+    except Exception:
+        c_state = GameStateC()
+
     c_state.magic = PROTOCOL_MAGIC
     c_state.version = PROTOCOL_VERSION
     c_state.my_peer_id = _bridge.my_peer_id
@@ -155,15 +159,22 @@ def push_local_update(game_state) -> None:
         uid = int(u.unit_id if hasattr(u, 'unit_id') else i)
         owner = int(u.owner_id if hasattr(u, 'owner_id') else _bridge.my_peer_id)
         
-        c_state.units[i].id = uid
-        c_state.units[i].team = owner
-        c_state.units[i].owner_peer = owner
-        c_state.units[i].x = float(u.position[0])
-        c_state.units[i].y = float(u.position[1])
-        c_state.units[i].hp = int(u.current_hp)
-        c_state.units[i].hp_max = int(getattr(u, 'max_hp', 100))
-        c_state.units[i].alive = 1 if c_state.units[i].hp > 0 else 0
-        c_state.units[i].dirty = 1 if owner == _bridge.my_peer_id else 0
+        # UNIQUEMENT si on est propriétaire, on écrase les données dans la RAM !
+        # Ou si l'unité est encore vide (init).
+        if owner == _bridge.my_peer_id or c_state.units[i].hp_max == 0:
+            c_state.units[i].id = uid
+            c_state.units[i].team = owner
+            c_state.units[i].owner_peer = owner
+            c_state.units[i].x = float(u.position[0])
+            c_state.units[i].y = float(u.position[1])
+            c_state.units[i].hp = int(u.current_hp)
+            c_state.units[i].hp_max = int(getattr(u, 'max_hp', 100))
+            c_state.units[i].alive = 1 if c_state.units[i].hp > 0 else 0
+            c_state.units[i].dirty = 1
+        else:
+            # L'unité appartient au réseau, on la relit de la SHM, on ne la modifie pas !
+            # Et son dirty restera à 0 pour ne pas la re-broadcaster
+            c_state.units[i].dirty = 0
 
     _bridge.ecrire(c_state)
 

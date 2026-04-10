@@ -112,7 +112,7 @@ class Engine:
 
     def initialize_units(self):
         """charge la liste d'unite"""
-        uid = 1
+        uid = 0
         for (x, y) in self.game_map.map:
             u = self.game_map.get_unit(x, y)
             u.unit_id = uid
