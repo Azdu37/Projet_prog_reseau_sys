@@ -427,7 +427,15 @@ class Engine:
 
             existing = self.find_unit(u["unit_id"])
             if existing:
-                existing.position = (u["x"], u["y"])
+                new_pos = (u["x"], u["y"])
+                old_pos = existing.position
+                if old_pos != new_pos:
+                    if self.game_map.get_unit(*old_pos) is existing:
+                        self.game_map.maj_unit_posi(existing, new_pos)
+                    else:
+                        self.game_map.map.pop(old_pos, None)
+                        self.game_map.map[new_pos] = existing
+                        existing.position = new_pos
                 existing.current_hp = u["hp"]
                 existing.is_alive = existing.current_hp > 0
                 existing.direction = (0, 0)
