@@ -349,6 +349,9 @@ class Map:
     ########################################################
 
     def attack2(self, unit, target):
+        # En mode réparti, seules les unités locales déclenchent réellement les attaques
+        if hasattr(unit, 'is_local') and not unit.is_local:
+            return None
         if not unit.can_attack(target):
             return None  # Ne peut pas attaquer
         if unit.time_before_next_attack > 0:
@@ -496,7 +499,9 @@ class Map:
             dist_2 = self.distance_2((px, py), (x, y))
 
             if dist_2 < (unit.size) ** 2:
-                unit.take_damage(projectile.shooter)
+                # En mode réparti, seule une munition tirée par une unité locale applique les dégâts
+                if not hasattr(projectile.shooter, 'is_local') or projectile.shooter.is_local:
+                    unit.take_damage(projectile.shooter)
                 return True
 
         return False

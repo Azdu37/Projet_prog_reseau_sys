@@ -1,1 +1,0 @@
-# lecture/écriture état partagé

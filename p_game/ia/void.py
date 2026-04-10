@@ -10,5 +10,5 @@ class void(General):
     def initialize(self):
         return super().initialize()
 
-    def play_turn(self,unit):
+    def play_turn(self, unit, turn):
         pass
