@@ -9,7 +9,7 @@ if os.name != 'nt':
     import tty
 from collections import deque
 from random import randint
-from numpy import mean
+from statistics import mean
 
 from ia.registry import AI_REGISTRY
 
@@ -556,7 +556,7 @@ class Engine:
             'units_ia2': len([u for u in self.units if u.team == 'B' and u.is_alive]),
             #'units_ia2_hp': sum(u.current_hp for u in self.units if u.team == 'B' and u.is_alive),
             'target_tps' : self.tps,
-            'real_tps': mean(self.tab_tps_affichage),
+            'real_tps': mean(self.tab_tps_affichage) if self.tab_tps_affichage else 0,
             'turn_fps': round(self.turn_fps),
             'time_from_start': f'{(time.time() - self.star_execution_time):.2f}s',
             'in_game_time': f'{(self.current_turn / 60):.2f}s',
