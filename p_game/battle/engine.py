@@ -314,7 +314,7 @@ class Engine:
             unit.update(time_per_tick)
             # Retirer les unités mortes de la carte pour qu'elles disparaissent
             if not unit.is_alive:
-                self.game_map.map.pop(unit.position, None)
+                self.game_map.remove_unit_instance(unit)
 
     def update_projectiles(self):
             self.game_map.update_projectiles()

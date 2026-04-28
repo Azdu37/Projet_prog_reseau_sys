@@ -163,6 +163,10 @@ def init(player_id: int) -> bool:
 
 
 def _set_unit_position(engine, unit, new_pos):
+    if not unit.is_alive:
+        _remove_unit_from_map(engine, unit)
+        return
+
     if tuple(unit.position) == tuple(new_pos):
         return
 
@@ -171,6 +175,28 @@ def _set_unit_position(engine, unit, new_pos):
         game_map.maj_unit_posi(unit, tuple(new_pos))
     else:
         unit.position = tuple(new_pos)
+
+
+def _remove_unit_from_map(engine, unit):
+    game_map = getattr(engine, "game_map", None)
+    if game_map is None:
+        return
+    if hasattr(game_map, "remove_unit_instance"):
+        game_map.remove_unit_instance(unit)
+    else:
+        game_map.map.pop(unit.position, None)
+
+
+def _mark_unit_dead(engine, unit):
+    if hasattr(unit, "die"):
+        unit.die()
+    else:
+        unit.current_hp = 0
+        unit.is_alive = False
+        unit.state = "dead"
+        unit.target = None
+        unit.direction = (0, 0)
+    _remove_unit_from_map(engine, unit)
 
 
 def exchange_state(engine) -> None:
@@ -203,6 +229,8 @@ def exchange_state(engine) -> None:
         uid = unit.unit_id
         if uid >= MAX_UNITS:
             continue
+        if unit.current_hp <= 0 and unit.is_alive:
+            _mark_unit_dead(engine, unit)
 
         slot = c_state.units[uid]
         
@@ -220,16 +248,10 @@ def exchange_state(engine) -> None:
                 unit.current_hp = slot.hp
                 unit.get_hit = 0.2
                 if unit.current_hp <= 0:
-                    unit.current_hp = 0
-                    unit.is_alive = False
-                    unit.state = "dead"
-                    unit.target = None
+                    _mark_unit_dead(engine, unit)
             # L'adversaire a tué notre unité
             elif slot.hp == 0 and slot.alive == 0 and unit.is_alive:
-                unit.current_hp = 0
-                unit.is_alive = False
-                unit.state = "dead"
-                unit.target = None
+                _mark_unit_dead(engine, unit)
         else:
             # ── UNITÉ DISTANTE ──
             # Mettre à jour la position (l'adversaire la contrôle)
@@ -244,10 +266,7 @@ def exchange_state(engine) -> None:
             
             # Mort confirmée par le réseau (alive=0 ET hp_max > 0 = slot initialisé)
             if slot.alive == 0 and slot.hp_max > 0 and slot.hp == 0:
-                unit.current_hp = 0
-                unit.is_alive = False
-                unit.state = "dead"
-                unit.target = None
+                _mark_unit_dead(engine, unit)
 
     # ── PHASE 2 : Écrire l'état Python dans la SHM pour le C ──────────────
     c_state.magic = PROTOCOL_MAGIC

@@ -107,6 +107,13 @@ class Unit:
     def is_dead(self):
         return self.current_hp <= 0
 
+    def die(self):
+        self.current_hp = 0
+        self.is_alive = False
+        self.state = "dead"
+        self.target = None
+        self.direction = (0, 0)
+
 
     def take_damage(self, attacker):
         """ - sommer les dommages subis dans une variable
@@ -132,6 +139,8 @@ class Unit:
         # HP n'est jamais negatif
         if self.current_hp < 0:
             self.current_hp = 0
+        if self.current_hp == 0:
+            self.die()
 
         return total_damage
 
@@ -214,11 +223,8 @@ class Unit:
         # update time 
     def update(self, time_passed):
             # Si l'unité est morte, elle ne peut rien faire
-            if self.is_dead():
-                self.is_alive = False
-                self.state = "dead"
-                self.target = None
-                self.direction = (0, 0)
+            if self.is_dead() or not self.is_alive:
+                self.die()
                 return
 
             if self.state =="attacking":

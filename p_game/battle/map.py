@@ -56,6 +56,13 @@ class Map:
         if (x, y) in self.map:
             self.map.pop((x, y), None)
 
+    def remove_unit_instance(self, unit):
+        """Retire une unite precise de la carte."""
+        self.map.pop(unit.position, None)
+        for pos, other_unit in list(self.map.items()):
+            if other_unit is unit:
+                self.map.pop(pos, None)
+
     def load(self, scenario_name):
         """"Charge une carte depuis un scénario donné ou un fichier de sauvegarde"""
 
