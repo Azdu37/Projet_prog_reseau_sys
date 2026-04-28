@@ -151,6 +151,40 @@ int net_send_state_update(const UnitState *unit,
 }
 
 /* ─────────────────────────────────────────────
+ * net_send_to
+ * ───────────────────────────────────────────── */
+int net_send_to(uint8_t peer_id, const NetMessage *msg)
+{
+    if (g_sock < 0) return -1;
+
+    Peer *dest = NULL;
+    for (int i = 0; i < g_peer_count; i++) {
+        if (g_peers[i].peer_id == peer_id) {
+            dest = &g_peers[i];
+            break;
+        }
+    }
+    if (!dest) return -1;
+
+    sendto(g_sock, msg, sizeof(NetMessage), 0,
+           (struct sockaddr *)&dest->addr, sizeof(dest->addr));
+    return 0;
+}
+
+/* ─────────────────────────────────────────────
+ * net_broadcast
+ * ───────────────────────────────────────────── */
+int net_broadcast(const NetMessage *msg)
+{
+    int ok = 0;
+    for (int i = 0; i < g_peer_count; i++) {
+        if (net_send_to(g_peers[i].peer_id, msg) == 0)
+            ok++;
+    }
+    return ok;
+}
+
+/* ─────────────────────────────────────────────
  * net_broadcast_state_update
  * Envoie à TOUS les pairs enregistrés.
  * ───────────────────────────────────────────── */

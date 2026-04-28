@@ -8,6 +8,7 @@
  */
 
 #include "protocol.h"
+#include "network.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -72,8 +73,47 @@ void proto_handle_incoming(const NetMessage *msg, GameState *local_state)
         break;
     }
 
-    case MSG_OWN_REQUEST:
-    case MSG_OWN_GRANT:
+    case MSG_OWN_REQUEST: {
+        /* On demande la propriété d'une unité */
+        uint16_t uid = msg->unit_id;
+        if (uid >= MAX_UNITS) break;
+
+        UnitState *local_unit = &local_state->units[uid];
+        
+        /* Si on est le propriétaire actuel, on cède la propriété */
+        if (local_unit->owner_peer == local_state->my_peer_id) {
+            printf("[proto] Cède propriété unité %d à peer %d\n", uid, msg->sender_id);
+            local_unit->owner_peer = msg->sender_id;
+            local_unit->dirty = 0; /* Éviter broadcast de l'update normale */
+
+            /* Répondre avec un GRANT contenant l'état actuel */
+            NetMessage grant;
+            grant.magic = PROTOCOL_MAGIC;
+            grant.type = MSG_OWN_GRANT;
+            grant.sender_id = local_state->my_peer_id;
+            grant.unit_id = uid;
+            memcpy(&grant.unit, local_unit, sizeof(UnitState));
+            
+            net_send_to(msg->sender_id, &grant);
+        }
+        break;
+    }
+
+    case MSG_OWN_GRANT: {
+        /* On nous accorde la propriété */
+        uint16_t uid = msg->unit_id;
+        if (uid >= MAX_UNITS) break;
+
+        UnitState *local_unit = &local_state->units[uid];
+        printf("[proto] Reçu propriété unité %d de peer %d\n", uid, msg->sender_id);
+        
+        /* Mettre à jour l'unité avec l'état reçu */
+        memcpy(local_unit, &msg->unit, sizeof(UnitState));
+        local_unit->owner_peer = local_state->my_peer_id;
+        local_unit->dirty = 1; /* Pour que Python voit le changement */
+        break;
+    }
+
     case MSG_OWN_DENY:
         break;
 

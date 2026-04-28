@@ -12,6 +12,7 @@ from random import randint
 from statistics import mean
 
 from ia.registry import AI_REGISTRY
+from reports.reporter import generate_report
 
 def fix_string(string):
     """Transforme une chaîne de caractères en une version "fixe" (minuscules, sans espaces ou caractères spéciaux)"""
@@ -391,11 +392,19 @@ class Engine:
             if unit.team == 'R':
                 red_alive += 1
                 if not self.is_distributed or self.local_team == 'R':
-                    self.ia1.play_turn(unit, self.current_turn)
+                    # V2: Demander la propriété si on ne l'a pas encore
+                    if self.is_distributed and not getattr(unit, 'is_local', True):
+                        self.request_network_ownership(unit)
+                    else:
+                        self.ia1.play_turn(unit, self.current_turn)
             elif unit.team == 'B':
                 blue_alive += 1
                 if not self.is_distributed or self.local_team == 'B':
-                    self.ia2.play_turn(unit, self.current_turn)
+                    # V2: Demander la propriété si on ne l'a pas encore
+                    if self.is_distributed and not getattr(unit, 'is_local', True):
+                        self.request_network_ownership(unit)
+                    else:
+                        self.ia2.play_turn(unit, self.current_turn)
             
             # Détection de changement d'état (mouvement ou combat)
 

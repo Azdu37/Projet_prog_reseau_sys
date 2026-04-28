@@ -28,7 +28,7 @@ typedef struct {
     uint8_t  team;         /* 0 = équipe A, 1 = équipe B, ...        */
     uint8_t  owner_peer;   /* index du PC propriétaire (V2)          */
     uint8_t  alive;        /* 1 = vivant, 0 = mort                   */
-    uint8_t  dirty;        /* 1 = modifié, à envoyer sur le réseau   */
+    uint8_t  dirty;        /* 1 = update, 2 = request ownership (V2) */
     uint8_t  _pad[3];      /* alignement 8 octets                    */
     float    x;            /* position X                             */
     float    y;            /* position Y                             */

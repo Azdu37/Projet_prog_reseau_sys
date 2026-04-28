@@ -69,6 +69,16 @@ int net_send_state_update(const UnitState *unit,
                           uint8_t sender_id);
 
 /**
+ * net_send_to - Envoie un NetMessage complet à un pair précis.
+ */
+int net_send_to(uint8_t peer_id, const NetMessage *msg);
+
+/**
+ * net_broadcast - Envoie un NetMessage à TOUS les pairs enregistrés.
+ */
+int net_broadcast(const NetMessage *msg);
+
+/**
  * net_broadcast_state_update - Envoie à TOUS les pairs enregistrés.
  * @return nombre de pairs atteints, -1 si erreur
  */

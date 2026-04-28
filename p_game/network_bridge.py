@@ -85,20 +85,24 @@ class POSIXBridge:
 
     def connecter(self, tentatives=30, delai=0.2):
         fd = -1
+        shm_name = os.getenv("SHM_NAME", SHM_NAME)
+        sem_w = os.getenv("SEM_W", SEM_WRITE_NAME)
+        sem_r = os.getenv("SEM_R", SEM_READ_NAME)
+
         for i in range(tentatives):
-            fd = libc.shm_open(SHM_NAME.encode(), os.O_RDWR, 0)
+            fd = libc.shm_open(shm_name.encode(), os.O_RDWR, 0)
             if fd >= 0: break
             err = ctypes.get_errno()
             if i < tentatives - 1:
-                print(f"[bridge] Attente du processus C (shm_open)... {i+1}/{tentatives}")
+                print(f"[bridge] Attente du processus C (shm_open {shm_name})... {i+1}/{tentatives}")
                 time.sleep(delai)
             else:
-                raise OSError(err, f"shm_open({SHM_NAME}) échoué. Le C ./c_net tourne-t-il ?")
+                raise OSError(err, f"shm_open({shm_name}) échoué. Le C ./c_net tourne-t-il ?")
 
         size = ctypes.sizeof(GameStateC)
         map_addr = libc.mmap(None, size, _PROT_READ | _PROT_WRITE, _MAP_SHARED, fd, 0)
-        self._sem_w = libc.sem_open(SEM_WRITE_NAME.encode(), 0, 0, 0)
-        self._sem_r = libc.sem_open(SEM_READ_NAME.encode(), 0, 0, 0)
+        self._sem_w = libc.sem_open(sem_w.encode(), 0, 0, 0)
+        self._sem_r = libc.sem_open(sem_r.encode(), 0, 0, 0)
         
         self._fd = fd
         self._map_addr = map_addr
@@ -144,6 +148,13 @@ def init(player_id: int) -> None:
         _bridge = None
 
 
+def request_ownership(unit) -> bool:
+    """Marque une unité pour demander sa propriété au prochain exchange_state."""
+    if not _bridge: return False
+    unit.pending_ownership_request = True
+    return True
+
+
 def exchange_state(engine) -> None:
     """
     Échange atomique avec la SHM — appelé chaque tick du game loop.
@@ -176,10 +187,21 @@ def exchange_state(engine) -> None:
         if slot.hp_max == 0:
             continue
         
-        owner = unit.owner_id  # 0=R, 1=B
+        # Mise à jour du propriétaire (V2)
+        old_owner = unit.owner_id
+        unit.owner_id = slot.owner_peer
+        unit.is_local = (unit.owner_id == my_peer)
 
-        if owner == my_peer:
+        if unit.is_local:
             # ── NOTRE unité ──
+            if old_owner != my_peer:
+                print(f"[bridge] Propriété ACQUISE pour unité {uid}")
+                # On vient d'acquérir la propriété -> on prend l'état complet
+                unit.position = (slot.x, slot.y)
+                unit.current_hp = slot.hp
+                unit.is_alive = (slot.alive != 0)
+                if not unit.is_alive: unit.state = "dead"
+
             # Accepter uniquement les baisses de HP (dégâts infligés par l'adversaire)
             if slot.hp < unit.current_hp and slot.hp >= 0:
                 unit.current_hp = slot.hp
@@ -191,11 +213,13 @@ def exchange_state(engine) -> None:
                     unit.target = None
         else:
             # ── UNITÉ DISTANTE ──
+            if old_owner == my_peer:
+                print(f"[bridge] Propriété PERDUE pour unité {uid}")
+
             # Mettre à jour la position (l'adversaire la contrôle)
             unit.position = (slot.x, slot.y)
             
             # Mettre à jour HP : accepter les baisses
-            # (soit l'adversaire a pris des dégâts de notre part, soit d'un autre)
             if slot.hp < unit.current_hp:
                 unit.current_hp = slot.hp
                 unit.get_hit = 0.2
@@ -219,16 +243,27 @@ def exchange_state(engine) -> None:
             continue
 
         slot = c_state.units[uid]
-        owner = unit.owner_id  # 0=R, 1=B
+        
+        # Requête de propriété en attente ?
+        if getattr(unit, 'pending_ownership_request', False):
+            if not unit.is_local:
+                slot.dirty = 2 # 2 = MSG_OWN_REQUEST
+                unit.pending_ownership_request = False
+                # On ne met pas à jour le reste pour l'instant, on attend le GRANT
+                continue
+            else:
+                unit.pending_ownership_request = False
+
+        owner = unit.owner_id  # 0=R, 1=B ou autre peer_id
 
         # Toujours écrire l'identifiant et les stats fixes
         slot.id = uid
-        slot.team = owner
+        slot.team = 0 if unit.team == 'R' else 1
         slot.owner_peer = owner
         slot.hp_max = int(unit.max_hp)
         slot.alive = 1 if unit.is_alive else 0
 
-        if owner == my_peer:
+        if unit.is_local:
             # ── NOTRE unité : envoyer position + HP complet ──
             slot.x = float(unit.position[0])
             slot.y = float(unit.position[1])
