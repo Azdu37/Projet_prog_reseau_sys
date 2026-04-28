@@ -81,9 +81,6 @@ class Engine:
         self.is_running = False
         self.winner = None
         self.winner_team = None
-        self._victory_pending_state = None
-        self._victory_pending_turn = None
-        self.distributed_victory_grace_turns = 60
         self.view = None
         self.pressed_keys = set()
         self.real_tps = 0
@@ -422,7 +419,7 @@ class Engine:
         network_bridge.exchange_state(self)
 
     def request_network_ownership(self, unit):
-        """Demande la propriété réseau d'une unité (protocole de cohérence rudimentaire)."""
+        """Stub préparatoire pour la V2. La V1 n'a pas de vrai transfert de propriété."""
         if not self.is_distributed:
             return False
         try:
@@ -439,7 +436,7 @@ class Engine:
         return False
 
     def cede_network_ownership(self, unit, new_owner_team=None):
-        """Cède la propriété réseau d'une unité."""
+        """Stub préparatoire pour la V2. La V1 n'a pas de vrai transfert de propriété."""
         if not self.is_distributed:
             return False
         try:
@@ -569,19 +566,8 @@ class Engine:
             battle_finished = True
 
         if not battle_finished:
-            self._victory_pending_state = None
-            self._victory_pending_turn = None
+            self.winner_team = None
             return
-
-        if self.is_distributed:
-            pending_state = (winner_team, units_team1, units_team2)
-            if pending_state != self._victory_pending_state:
-                self._victory_pending_state = pending_state
-                self._victory_pending_turn = self.current_turn
-                return
-
-            if self.current_turn - self._victory_pending_turn < self.distributed_victory_grace_turns:
-                return
 
         self.winner_team = winner_team
         self.winner = self.ia1 if winner_team == 'R' else self.ia2 if winner_team == 'B' else None

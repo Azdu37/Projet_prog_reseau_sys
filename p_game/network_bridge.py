@@ -1,5 +1,5 @@
 # network_bridge.py
-# V2 — Échange atomique Python ↔ SHM (sans thread listener)
+# V1 — Bridge Python ↔ SHM en best-effort (sans thread listener)
 #
 # Principe :
 #   exchange_state() est appelé à chaque tick du game loop.
@@ -7,7 +7,7 @@
 #   2. Applique les updates distantes aux unités Python
 #   3. Écrit l'état local Python dans la SHM pour que C l'envoie
 #
-# Plus de thread, plus de race conditions.
+# Objectif V1 : partager l'état au mieux, sans garantie forte de cohérence.
 
 import ctypes
 import os
@@ -283,9 +283,6 @@ def exchange_state(engine) -> None:
         owner = unit.owner_id  # 0=R, 1=B
 
         # Toujours écrire TOUTES les données pour garder la SHM cohérente
-        previous_hp = slot.hp
-        previous_alive = slot.alive
-
         slot.id = uid
         slot.team = owner
         slot.owner_peer = owner
@@ -307,14 +304,8 @@ def exchange_state(engine) -> None:
             # Toujours écrire le HP pour garder la SHM initialisée
             slot.hp = python_hp
             
-            # Retransmettre les degats/morts distants: UDP peut perdre le dernier paquet.
-            if (
-                (current_shm_hp > 0 and python_hp < current_shm_hp)
-                or python_hp < int(unit.max_hp)
-                or not unit.is_alive
-                or previous_alive != slot.alive
-                or previous_hp != slot.hp
-            ):
+            # V1 best-effort: on signale seulement les baisses de HP observées localement.
+            if current_shm_hp > 0 and python_hp < current_shm_hp:
                 slot.dirty = 1
             else:
                 slot.dirty = 0
