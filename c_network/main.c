@@ -85,9 +85,16 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* Enregistre chaque pair passé en argument */
+    /* Enregistre chaque pair passé en argument.
+     * Convention V1 : les IPs sont données dans l'ordre des peer_id,
+     * en sautant notre propre id.
+     */
+    uint8_t next_peer_id = 0;
     for (int i = 2; i < argc; i++) {
-        uint8_t peer_id = (uint8_t)(i - 1); /* peer 1, 2, 3... */
+        while (next_peer_id == my_peer_id) {
+            next_peer_id++;
+        }
+        uint8_t peer_id = next_peer_id++;
         if (net_add_peer(argv[i], NET_PORT, peer_id) < 0) {
             fprintf(stderr, "[main] Impossible d'ajouter le pair %s\n", argv[i]);
         }

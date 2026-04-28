@@ -5,13 +5,31 @@
 # Architecture : Python ↔ SHM ↔ C ↔ UDP ↔ C ↔ SHM ↔ Python
 #
 # Usage :
-#   ./scripts/launch.sh <IP_ADVERSAIRE> <COULEUR> <MON_IA> [SCENARIO]
+#   ./scripts/launch.sh <IP_ADVERSAIRE> <COULEUR> <MON_IA> [SCENARIO] [--terminal|--no-terminal]
 # =============================================================================
 set -e
+
+C_PID=""
+
+cleanup() {
+    if [ -n "$C_PID" ] && kill -0 "$C_PID" 2>/dev/null; then
+        echo ""
+        echo "▶ Nettoyage..."
+        kill "$C_PID" 2>/dev/null && echo "  ✓ Processus C arrêté." || true
+    fi
+    if [ -n "${ROOT:-}" ] && [ -d "$ROOT/c_network" ]; then
+        cd "$ROOT/c_network"
+        make clean-ipc -s > /dev/null 2>&1 || true
+        echo "  ✓ SHM purgée."
+    fi
+}
+
+trap cleanup EXIT
 
 if [ "$#" -lt 3 ]; then
     echo "╔════════════════════════════════════════════════════════════════╗"
     echo "║ Usage: ./scripts/launch.sh <IP_ADVERSAIRE> <COULEUR> <MON_IA>  ║"
+    echo "║        [SCENARIO] [--terminal|--no-terminal]                   ║"
     echo "║                                                                ║"
     echo "║   <COULEUR> : ROUGE ou BLEU                                    ║"
     echo "║   <MON_IA>  : basicia, majordaft, braindead, etc.              ║"
@@ -25,7 +43,31 @@ fi
 REMOTE_IP="$1"
 COULEUR=$(echo "$2" | tr '[:lower:]' '[:upper:]')
 MON_IA="$(echo "$3" | tr '[:upper:]' '[:lower:]')"
-SCENARIO="${4:-stest7}"
+shift 3
+
+SCENARIO="stest7"
+PY_VIEW_ARGS=()
+
+if [ "$#" -gt 0 ] && [[ "$1" != -* ]]; then
+    SCENARIO="$1"
+    shift
+fi
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --terminal|-t)
+            PY_VIEW_ARGS+=("--terminal")
+            ;;
+        --no-terminal)
+            PY_VIEW_ARGS+=("--no-terminal")
+            ;;
+        *)
+            echo "ERREUR: option inconnue '$1'. Utilisez --terminal ou --no-terminal."
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 if [[ "$COULEUR" == "ROUGE" || "$COULEUR" == "R" ]]; then
     PEER_ID=0
@@ -54,6 +96,11 @@ echo "║  🎯 ÉQUIPE   : $COULEUR"
 echo "║  🤖 IA       : $MON_IA"
 echo "║  📡 ADVERSAIRE: $REMOTE_IP"
 echo "║  🗺️  SCENARIO : $SCENARIO"
+if [ "${#PY_VIEW_ARGS[@]}" -gt 0 ]; then
+echo "║  🖥️  AFFICHAGE: ${PY_VIEW_ARGS[*]}"
+else
+echo "║  🖥️  AFFICHAGE: graphique (pygame)"
+fi
 echo "║                                                             ║"
 echo "║  ⚠️  L'autre joueur doit choisir l'Équipe $COULEUR_ADVERSE !  ║"
 echo "╚═════════════════════════════════════════════════════════════╝"
@@ -90,14 +137,7 @@ echo ""
 
 cd "$ROOT/p_game"
 python3 main.py run "$SCENARIO" "$IA_ROUGE" "$IA_BLEUE" \
-    --distributed --local-team "$LOCAL_TEAM"
+    --distributed --local-team "$LOCAL_TEAM" "${PY_VIEW_ARGS[@]}"
 
-# ── Nettoyage ────────────────────────────────────────────────────────────────
-echo ""
-echo "▶ Nettoyage..."
-kill "$C_PID" 2>/dev/null && echo "  ✓ Processus C arrêté." || true
-cd "$ROOT/c_network"
-make clean-ipc -s > /dev/null 2>&1 || true
-echo "  ✓ SHM purgée."
 echo ""
 echo "✓ Terminé."

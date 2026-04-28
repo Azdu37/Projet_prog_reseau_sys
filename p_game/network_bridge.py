@@ -16,30 +16,32 @@ import time
 # ── Constantes correspondantes au protocole C ────────────────────────────────
 PROTOCOL_MAGIC   = 0xBABA1234
 PROTOCOL_VERSION = 1
-MAX_UNITS        = 256
+MAX_UNITS        = 512
 SHM_NAME         = "/battle_state"
 SEM_WRITE_NAME   = "/battle_sem_w"
 SEM_READ_NAME    = "/battle_sem_r"
 
 # ── Définition LibC (POSIX IPC) ──────────────────────────────────────────────
-libc = ctypes.CDLL(None, use_errno=True)
+POSIX_AVAILABLE = os.name != "nt"
+libc = ctypes.CDLL(None, use_errno=True) if POSIX_AVAILABLE else None
 
-libc.shm_open.argtypes  = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
-libc.shm_open.restype   = ctypes.c_int
-libc.mmap.argtypes      = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
-libc.mmap.restype       = ctypes.c_void_p
-libc.munmap.argtypes    = [ctypes.c_void_p, ctypes.c_size_t]
-libc.munmap.restype     = ctypes.c_int
-libc.close.argtypes     = [ctypes.c_int]
-libc.close.restype      = ctypes.c_int
-libc.sem_open.argtypes  = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
-libc.sem_open.restype   = ctypes.c_void_p
-libc.sem_close.argtypes = [ctypes.c_void_p]
-libc.sem_close.restype  = ctypes.c_int
-libc.sem_wait.argtypes  = [ctypes.c_void_p]
-libc.sem_wait.restype   = ctypes.c_int
-libc.sem_post.argtypes  = [ctypes.c_void_p]
-libc.sem_post.restype   = ctypes.c_int
+if libc is not None:
+    libc.shm_open.argtypes  = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
+    libc.shm_open.restype   = ctypes.c_int
+    libc.mmap.argtypes      = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
+    libc.mmap.restype       = ctypes.c_void_p
+    libc.munmap.argtypes    = [ctypes.c_void_p, ctypes.c_size_t]
+    libc.munmap.restype     = ctypes.c_int
+    libc.close.argtypes     = [ctypes.c_int]
+    libc.close.restype      = ctypes.c_int
+    libc.sem_open.argtypes  = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+    libc.sem_open.restype   = ctypes.c_void_p
+    libc.sem_close.argtypes = [ctypes.c_void_p]
+    libc.sem_close.restype  = ctypes.c_int
+    libc.sem_wait.argtypes  = [ctypes.c_void_p]
+    libc.sem_wait.restype   = ctypes.c_int
+    libc.sem_post.argtypes  = [ctypes.c_void_p]
+    libc.sem_post.restype   = ctypes.c_int
 
 _PROT_READ  = 0x1
 _PROT_WRITE = 0x2
@@ -50,12 +52,12 @@ _MAP_FAILED = ctypes.c_void_p(-1).value
 # ── Structures Ctypes (DOIT correspondre EXACTEMENT à shared/protocol.h) ────
 class UnitState(ctypes.Structure):
     _fields_ = [
-        ("id",         ctypes.c_uint8),
+        ("id",         ctypes.c_uint16),
         ("team",       ctypes.c_uint8),
         ("owner_peer", ctypes.c_uint8),
         ("alive",      ctypes.c_uint8),
         ("dirty",      ctypes.c_uint8),
-        ("_pad",       ctypes.c_uint8 * 3),
+        ("_pad",       ctypes.c_uint8 * 2),
         ("x",          ctypes.c_float),
         ("y",          ctypes.c_float),
         ("hp",         ctypes.c_uint16),
@@ -66,10 +68,10 @@ class GameStateC(ctypes.Structure):
     _fields_ = [
         ("magic",      ctypes.c_uint32),
         ("version",    ctypes.c_uint16),
-        ("unit_count", ctypes.c_uint8),
+        ("unit_count", ctypes.c_uint16),
         ("my_peer_id", ctypes.c_uint8),
+        ("_pad0",      ctypes.c_uint8 * 3),
         ("tick",       ctypes.c_uint32),
-        ("_pad",       ctypes.c_uint8 * 4),
         ("units",      UnitState * MAX_UNITS),
     ]
 
@@ -84,6 +86,9 @@ class POSIXBridge:
         self._state = None
 
     def connecter(self, tentatives=30, delai=0.2):
+        if libc is None:
+            raise RuntimeError("IPC POSIX indisponible sur Windows natif : lancez le mode distribué sous WSL/Linux.")
+
         fd = -1
         for i in range(tentatives):
             fd = libc.shm_open(SHM_NAME.encode(), os.O_RDWR, 0)
@@ -99,6 +104,16 @@ class POSIXBridge:
         map_addr = libc.mmap(None, size, _PROT_READ | _PROT_WRITE, _MAP_SHARED, fd, 0)
         self._sem_w = libc.sem_open(SEM_WRITE_NAME.encode(), 0, 0, 0)
         self._sem_r = libc.sem_open(SEM_READ_NAME.encode(), 0, 0, 0)
+
+        if map_addr == _MAP_FAILED:
+            err = ctypes.get_errno()
+            libc.close(fd)
+            raise OSError(err, "mmap de la SHM échoué")
+        if self._sem_w == _SEM_FAILED or self._sem_r == _SEM_FAILED:
+            err = ctypes.get_errno()
+            libc.munmap(map_addr, size)
+            libc.close(fd)
+            raise OSError(err, "sem_open échoué")
         
         self._fd = fd
         self._map_addr = map_addr
@@ -116,11 +131,11 @@ class POSIXBridge:
     def lire(self):
         if not self._state: raise RuntimeError("SHM non connectée")
         out = GameStateC()
-        libc.sem_wait(self._sem_r)
+        libc.sem_wait(self._sem_w)
         try:
             ctypes.memmove(ctypes.byref(out), ctypes.byref(self._state), ctypes.sizeof(GameStateC))
         finally:
-            libc.sem_post(self._sem_r)
+            libc.sem_post(self._sem_w)
         return out
 
     def fermer(self):
@@ -132,16 +147,30 @@ class POSIXBridge:
 
 # ── INSTANCE GLOBALE ──────────────────────────────────────────────────────────
 _bridge = None
+_warned_unit_cap = False
 
-def init(player_id: int) -> None:
+def init(player_id: int) -> bool:
     """Appelé par main.py pour s'accrocher à la mémoire IPC POSIX du ./c_net."""
     global _bridge
     _bridge = POSIXBridge(my_peer_id=player_id)
     try:
         _bridge.connecter()
+        return True
     except Exception as e:
         print(f"[bridge] Erreur de connexion IPC : {e}")
         _bridge = None
+        return False
+
+
+def _set_unit_position(engine, unit, new_pos):
+    if tuple(unit.position) == tuple(new_pos):
+        return
+
+    game_map = getattr(engine, "game_map", None)
+    if game_map is not None and hasattr(game_map, "maj_unit_posi"):
+        game_map.maj_unit_posi(unit, tuple(new_pos))
+    else:
+        unit.position = tuple(new_pos)
 
 
 def exchange_state(engine) -> None:
@@ -162,7 +191,12 @@ def exchange_state(engine) -> None:
     except Exception:
         return
 
-    units = list(engine.all_units())[:MAX_UNITS]
+    global _warned_unit_cap
+    all_units = list(engine.all_units())
+    units = all_units[:MAX_UNITS]
+    if len(all_units) > MAX_UNITS and not _warned_unit_cap:
+        print(f"[bridge] Attention : {len(all_units)} unités, seules les {MAX_UNITS} premières sont synchronisées.")
+        _warned_unit_cap = True
     
     # ── PHASE 1 : Lire les mises à jour du réseau depuis la SHM ──────────
     for unit in units:
@@ -201,7 +235,7 @@ def exchange_state(engine) -> None:
             # Mettre à jour la position (l'adversaire la contrôle)
             # Ne pas appliquer (0,0) qui signifie "pas encore reçu du réseau"
             if slot.x != 0.0 or slot.y != 0.0:
-                unit.position = (slot.x, slot.y)
+                _set_unit_position(engine, unit, (slot.x, slot.y))
             
             # Mettre à jour HP : accepter seulement les baisses (slot.hp > 0 pour éviter init à 0)
             if slot.hp > 0 and slot.hp < unit.current_hp:
@@ -220,6 +254,7 @@ def exchange_state(engine) -> None:
     c_state.version = PROTOCOL_VERSION
     c_state.my_peer_id = my_peer
     c_state.unit_count = len(units)
+    c_state.tick = int(getattr(engine, "current_turn", 0))
 
     for unit in units:
         uid = unit.unit_id

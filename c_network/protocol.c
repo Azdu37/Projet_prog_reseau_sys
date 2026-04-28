@@ -1,7 +1,7 @@
 /*
  * protocol.c - incoming network message handling
  *
- * V2 : Gestion intelligente des HP
+ * V1 : Gestion best-effort des HP
  *   - Unités qu'on possède : accepte uniquement les baisses de HP (dégâts distants)
  *   - Unités distantes : accepte la mise à jour complète (position + HP)
  *   - Utilise unit_id comme index de slot pour cohérence avec Python
@@ -75,6 +75,7 @@ void proto_handle_incoming(const NetMessage *msg, GameState *local_state)
     case MSG_OWN_REQUEST:
     case MSG_OWN_GRANT:
     case MSG_OWN_DENY:
+        /* Réservé : la V1 ne fait pas de transfert de propriété. */
         break;
 
     default:

@@ -19,7 +19,6 @@ for path in ["data/scenario", "data/save", "data/savedata"]:
         os.makedirs(path)
 
 import subprocess
-import network_bridge
 import time
 
 class BattleCLI:
@@ -89,7 +88,9 @@ class BattleCLI:
             player_id = 0 if args.local_team == 'R' else (1 if args.local_team == 'B' else 0)
             
             # Init network bridge (connexion à la SHM POSIX du processus C)
-            network_bridge.init(player_id)
+            import network_bridge
+            if not network_bridge.init(player_id):
+                raise RuntimeError("Mode réparti demandé, mais le bridge IPC n'est pas disponible. Lancez ./c_net via scripts/launch.sh sous WSL/Linux.")
             print(f"[NETWORK] Bridge SHM initialisé (peer_id={player_id})")
             time.sleep(0.3)
 
@@ -97,6 +98,7 @@ class BattleCLI:
             engine.start()
         finally:
             if args.distributed:
+                import network_bridge
                 network_bridge.shutdown()
 
     def cmd_load(self, args):

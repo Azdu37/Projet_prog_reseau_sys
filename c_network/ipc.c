@@ -24,8 +24,8 @@
  * ───────────────────────────────────────────── */
 static GameState *g_shm    = NULL;   /* pointeur vers la shm mappée  */
 static int        g_shm_fd = -1;     /* descripteur du segment shm   */
-static sem_t     *g_sem_w  = NULL;   /* sémaphore écriture (Python→C)*/
-static sem_t     *g_sem_r  = NULL;   /* sémaphore lecture  (C→Python)*/
+static sem_t     *g_sem_w  = NULL;   /* mutex SHM utilisé en V1       */
+static sem_t     *g_sem_r  = NULL;   /* réservé compatibilité scripts */
 static int        g_owner  = 0;      /* 1 = on a créé les ressources */
 
 /* Noms mémorisés pour le cleanup */
@@ -41,6 +41,12 @@ int ipc_init(const char *shm_name,
              const char *sem_r_name,
              int create)
 {
+    if (create) {
+        shm_unlink(shm_name);
+        sem_unlink(sem_w_name);
+        sem_unlink(sem_r_name);
+    }
+
     int flags = O_RDWR | (create ? O_CREAT : 0);
 
     /* --- Mémoire partagée --- */
@@ -85,7 +91,7 @@ int ipc_init(const char *shm_name,
     }
 
     /* --- Sémaphores --- */
-    int sem_flags = O_CREAT;
+    int sem_flags = create ? O_CREAT : 0;
     g_sem_w = sem_open(sem_w_name, sem_flags, 0666, 1); /* init à 1 = libre */
     if (g_sem_w == SEM_FAILED) {
         perror("[ipc] sem_open write");
@@ -115,27 +121,27 @@ int ipc_init(const char *shm_name,
 
 /* ─────────────────────────────────────────────
  * ipc_read_state
- * Lit le GameState depuis la shm (protégé par sem_r)
+ * Lit le GameState depuis la shm (protégé par le mutex SHM)
  * ───────────────────────────────────────────── */
 int ipc_read_state(GameState *out)
 {
-    if (!g_shm || !g_sem_r) return -1;
+    if (!g_shm || !g_sem_w) return -1;
 
-    sem_wait(g_sem_r);                   /* attente si Python écrit   */
+    sem_wait(g_sem_w);
     memcpy(out, g_shm, sizeof(GameState));
-    sem_post(g_sem_r);                   /* libère le sémaphore       */
+    sem_post(g_sem_w);
     return 0;
 }
 
 /* ─────────────────────────────────────────────
  * ipc_write_state
- * Écrit un GameState dans la shm (protégé par sem_w)
+ * Écrit un GameState dans la shm (protégé par le mutex SHM)
  * ───────────────────────────────────────────── */
 int ipc_write_state(const GameState *in)
 {
     if (!g_shm || !g_sem_w) return -1;
 
-    sem_wait(g_sem_w);                   /* attente si Python lit     */
+    sem_wait(g_sem_w);
     memcpy(g_shm, in, sizeof(GameState));
     sem_post(g_sem_w);
     return 0;

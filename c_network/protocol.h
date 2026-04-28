@@ -5,7 +5,7 @@
  * protocol.h (c_network) — Logique de protocole réseau
  *
  * V1 : traitement des messages MSG_STATE_UPDATE reçus.
- * V2 : ajoutera MSG_OWN_REQUEST / GRANT / DENY (ownership).
+ * Les messages d'ownership sont réservés et ignorés pour l'instant.
  *
  * NE PAS CONFONDRE avec shared/protocol.h qui définit les structures.
  */
