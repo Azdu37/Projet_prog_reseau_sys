@@ -193,6 +193,7 @@ def exchange_state(engine) -> None:
         unit.is_local = (unit.owner_id == my_peer)
 
         if unit.is_local:
+            unit._network_synced = True
             # ── NOTRE unité ──
             if old_owner != my_peer:
                 print(f"[bridge] Propriété ACQUISE pour unité {uid}")
@@ -220,16 +221,23 @@ def exchange_state(engine) -> None:
             unit.position = (slot.x, slot.y)
             
             # Mettre à jour HP : accepter les baisses
-            if slot.hp < unit.current_hp:
+            if slot.hp < unit.current_hp and slot.hp > 0:
                 unit.current_hp = slot.hp
                 unit.get_hit = 0.2
             
-            # Mettre à jour l'état mort
-            if slot.alive == 0 or slot.hp <= 0:
-                unit.current_hp = 0
-                unit.is_alive = False
-                unit.state = "dead"
-                unit.target = None
+            # Mettre à jour l'état mort uniquement si le slot confirme la mort explicitement
+            # On ignore si le slot.hp est 0 alors que le réseau ne semble pas encore synchronisé
+            if (slot.alive == 0 or slot.hp <= 0) and slot.hp_max > 0 and unit.current_hp > 0:
+                # On ne déclare mort que si on a déjà reçu des HP valides auparavant
+                # (ou si le propriétaire est bien identifié)
+                if getattr(unit, '_network_synced', False):
+                    unit.current_hp = 0
+                    unit.is_alive = False
+                    unit.state = "dead"
+                    unit.target = None
+            
+            if slot.hp > 0:
+                unit._network_synced = True
 
     # ── PHASE 2 : Écrire l'état Python dans la SHM pour le C ──────────────
     c_state.magic = PROTOCOL_MAGIC
@@ -261,6 +269,11 @@ def exchange_state(engine) -> None:
         slot.team = 0 if unit.team == 'R' else 1
         slot.owner_peer = owner
         slot.hp_max = int(unit.max_hp)
+        
+        # Initialisation du HP dans la SHM si pas encore fait (évite de tuer les unités distantes au début)
+        if slot.hp == 0 and unit.is_alive and unit.current_hp > 0:
+            slot.hp = int(unit.current_hp)
+            
         slot.alive = 1 if unit.is_alive else 0
 
         if unit.is_local:

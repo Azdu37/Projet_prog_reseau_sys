@@ -27,6 +27,15 @@ COULEUR=$(echo "$2" | tr '[:lower:]' '[:upper:]')
 MON_IA="$(echo "$3" | tr '[:upper:]' '[:lower:]')"
 SCENARIO="${4:-stest7}"
 
+# ── Étape 0 : Vérification IA ──────────────────────────────────────────────
+cd "$(dirname "$0")/../p_game"
+if ! python3 -c "import sys; sys.path.append('.'); from ia.registry import AI_REGISTRY; exit(0 if '$MON_IA' in AI_REGISTRY else 1)"; then
+    echo "ERREUR: L'IA '$MON_IA' n'existe pas."
+    echo "IA disponibles : $(python3 -c "import sys; sys.path.append('.'); from ia.registry import AI_REGISTRY; print(', '.join(AI_REGISTRY.keys()))")"
+    exit 1
+fi
+cd - > /dev/null
+
 if [[ "$COULEUR" == "ROUGE" || "$COULEUR" == "R" ]]; then
     PEER_ID=0
     LOCAL_TEAM="R"

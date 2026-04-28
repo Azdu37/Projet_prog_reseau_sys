@@ -287,9 +287,9 @@ class Map:
             return None
 
     def collision(self, unit, dest, depth):
-        """ 
+        r""" 
         Vérifie si une unité entrerait en collision avec une autre unité à la destination donnée
-        renvoie (dx,dy) direction normalisée de la collision, sinon renvoie (0,0), convention du signe : (point_contact → dest)
+        renvoie (dx,dy) direction normalisée de la collision, sinon renvoie (0,0), convention du signe : (point_contact → dest)
             / \ Push feature : en cas de collisions la fonction appel move_unit
            / ! \ sur l'unité detectée (si equipe =)
           /_____\ dans la direction [ -1 * (dx, dy) ] et avec depth += 1

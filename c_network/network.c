@@ -234,5 +234,18 @@ int net_recv(NetMessage *msg_out)
     printf("[net] <- Reçu paquet UDP de %s:%d (%ld octets) — MSG_TYPE: %d\n",
            inet_ntoa(sender_addr.sin_addr), ntohs(sender_addr.sin_port), (long)n, msg_out->type);
 
+    /* Vérifie si l'IP correspond à un pair connu */
+    int known = 0;
+    for (int i = 0; i < g_peer_count; i++) {
+        if (g_peers[i].addr.sin_addr.s_addr == sender_addr.sin_addr.s_addr) {
+            known = 1;
+            break;
+        }
+    }
+    if (!known) {
+        printf("[net] ATTENTION : Émetteur %s inconnu ! Vérifiez votre configuration IP.\n",
+               inet_ntoa(sender_addr.sin_addr));
+    }
+
     return 1;
 }

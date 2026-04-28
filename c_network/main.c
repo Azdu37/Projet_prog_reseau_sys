@@ -81,6 +81,19 @@ int main(int argc, char *argv[])
     uint8_t my_peer_id = (uint8_t)atoi(argv[1]);
     printf("[main] Démarrage — peer_id=%d\n", my_peer_id);
 
+    /* ── Initialisation réseau (port) ───────── */
+    uint16_t port = NET_PORT;
+    char *port_env = getenv("NET_PORT");
+    if (port_env) port = (uint16_t)atoi(port_env);
+
+    /* ── Diagnostic Réseau ──────────────────── */
+    printf("[main] Local port: %d\n", port);
+    if (argc > 2) {
+        printf("[main] En attente de %d pair(s)...\n", argc - 2);
+    } else {
+        printf("[main] AVERTISSEMENT : Aucun pair spécifié !\n");
+    }
+
     /* ── Initialisation IPC ─────────────────── */
     char *shm_name = SHM_NAME;
     char *sem_w = SEM_WRITE_NAME;
@@ -95,10 +108,6 @@ int main(int argc, char *argv[])
     }
 
     /* ── Initialisation réseau ──────────────── */
-    uint16_t port = NET_PORT;
-    char *port_env = getenv("NET_PORT");
-    if (port_env) port = (uint16_t)atoi(port_env);
-
     if (net_init(port) < 0) {
         ipc_close();
         return 1;
@@ -135,6 +144,8 @@ int main(int argc, char *argv[])
 
         if (net_add_peer(ip, peer_port, peer_id) < 0) {
             fprintf(stderr, "[main] Impossible d'ajouter le pair %s (id=%d, port=%d)\n", ip, peer_id, peer_port);
+        } else {
+            printf("[main] Pair ajouté : %s:%d (ID=%d)\n", ip, peer_port, peer_id);
         }
     }
 
