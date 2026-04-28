@@ -285,11 +285,13 @@ class GUI_view:
 
     def display_units(self, map : Map, fps):
         """ Affichage unités """
+        # Retirer les unités mortes de la liste d'affichage
+        self.all_units = [u for u in self.all_units if u.is_alive]
         # On trie les unités pour qu'elle soit dans le bon ordre d'affichage isometrique
         self.all_units.sort(key=lambda u: u.position[0] + u.position[1])
         for unit in self.all_units: 
             (x, y) = unit.position
-            if unit is None:
+            if unit is None or not unit.is_alive:
                 continue
 
             # On choisi la couleur d'affichage

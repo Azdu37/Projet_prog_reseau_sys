@@ -312,6 +312,9 @@ class Engine:
     def update_units(self,time_per_tick):
         for unit in self.units:
             unit.update(time_per_tick)
+            # Retirer les unités mortes de la carte pour qu'elles disparaissent
+            if not unit.is_alive:
+                self.game_map.map.pop(unit.position, None)
 
     def update_projectiles(self):
             self.game_map.update_projectiles()
