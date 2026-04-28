@@ -252,46 +252,40 @@ def exchange_state(engine) -> None:
 
         slot = c_state.units[uid]
         
-        # Requête de propriété en attente ?
+        # 1. Gestion des requêtes de propriété (prioritaire)
         if getattr(unit, 'pending_ownership_request', False):
+            unit.pending_ownership_request = False
             if not unit.is_local:
+                # On marque la requête pour le processus C
+                slot.id = uid
                 slot.dirty = 2 # 2 = MSG_OWN_REQUEST
-                unit.pending_ownership_request = False
-                # On ne met pas à jour le reste pour l'instant, on attend le GRANT
                 continue
-            else:
-                unit.pending_ownership_request = False
 
         owner = unit.owner_id  # 0=R, 1=B ou autre peer_id
 
-        # Toujours écrire l'identifiant et les stats fixes
-        slot.id = uid
-        slot.team = 0 if unit.team == 'R' else 1
-        slot.owner_peer = owner
-        slot.hp_max = int(unit.max_hp)
-        
-        # Initialisation du HP dans la SHM si pas encore fait (évite de tuer les unités distantes au début)
-        if slot.hp == 0 and unit.is_alive and unit.current_hp > 0:
-            slot.hp = int(unit.current_hp)
-            
-        slot.alive = 1 if unit.is_alive else 0
-
         if unit.is_local:
-            # ── NOTRE unité : envoyer position + HP complet ──
+            # 2. NOS UNITÉS : On est maître de l'état complet
+            slot.id = uid
+            slot.team = 0 if unit.team == 'R' else 1
+            slot.owner_peer = owner
+            slot.hp_max = int(unit.max_hp)
+            slot.alive = 1 if unit.is_alive else 0
             slot.x = float(unit.position[0])
             slot.y = float(unit.position[1])
             slot.hp = int(unit.current_hp)
-            slot.dirty = 1  # Toujours envoyer
+            slot.dirty = 1  # Toujours envoyer nos mises à jour
         else:
-            # ── UNITÉ DISTANTE : envoyer seulement si on l'a endommagée ──
+            # 3. UNITÉS DISTANTES : On ne touche à rien SAUF si on inflige des dégâts
             python_hp = int(unit.current_hp)
-            if python_hp < slot.hp:
-                # On a infligé des dégâts → écrire le nouveau HP et marquer dirty
+            # On n'intervient que si on a infligé des dégâts localement (python_hp < slot.hp)
+            # ET que le slot semble valide (déjà reçu du réseau ou initialisé)
+            if slot.hp_max > 0 and python_hp < slot.hp:
                 slot.hp = python_hp
                 slot.alive = 1 if python_hp > 0 else 0
                 slot.dirty = 1
+                # Note: On ne change PAS slot.x, slot.y, slot.owner_peer, etc.
             else:
-                # Pas de changement de notre part → ne pas renvoyer
+                # Pas de changement ou slot non initialisé -> on laisse tel quel
                 slot.dirty = 0
 
     try:
