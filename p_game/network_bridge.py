@@ -172,7 +172,7 @@ def exchange_state(engine) -> None:
 
         slot = c_state.units[uid]
         
-        # Slot pas encore initialisé par le réseau → ignorer
+        # Slot pas encore initialisé → ignorer complètement
         if slot.hp_max == 0:
             continue
         
@@ -181,7 +181,8 @@ def exchange_state(engine) -> None:
         if owner == my_peer:
             # ── NOTRE unité ──
             # Accepter uniquement les baisses de HP (dégâts infligés par l'adversaire)
-            if slot.hp < unit.current_hp and slot.hp >= 0:
+            # slot.hp > 0 évite de lire un slot non initialisé
+            if slot.hp > 0 and slot.hp < unit.current_hp:
                 unit.current_hp = slot.hp
                 unit.get_hit = 0.2
                 if unit.current_hp <= 0:
@@ -189,19 +190,26 @@ def exchange_state(engine) -> None:
                     unit.is_alive = False
                     unit.state = "dead"
                     unit.target = None
+            # L'adversaire a tué notre unité
+            elif slot.hp == 0 and slot.alive == 0 and unit.is_alive:
+                unit.current_hp = 0
+                unit.is_alive = False
+                unit.state = "dead"
+                unit.target = None
         else:
             # ── UNITÉ DISTANTE ──
             # Mettre à jour la position (l'adversaire la contrôle)
-            unit.position = (slot.x, slot.y)
+            # Ne pas appliquer (0,0) qui signifie "pas encore reçu du réseau"
+            if slot.x != 0.0 or slot.y != 0.0:
+                unit.position = (slot.x, slot.y)
             
-            # Mettre à jour HP : accepter les baisses
-            # (soit l'adversaire a pris des dégâts de notre part, soit d'un autre)
-            if slot.hp < unit.current_hp:
+            # Mettre à jour HP : accepter seulement les baisses (slot.hp > 0 pour éviter init à 0)
+            if slot.hp > 0 and slot.hp < unit.current_hp:
                 unit.current_hp = slot.hp
                 unit.get_hit = 0.2
             
-            # Mettre à jour l'état mort
-            if slot.alive == 0 or slot.hp <= 0:
+            # Mort confirmée par le réseau (alive=0 ET hp_max > 0 = slot initialisé)
+            if slot.alive == 0 and slot.hp_max > 0 and slot.hp == 0:
                 unit.current_hp = 0
                 unit.is_alive = False
                 unit.state = "dead"
@@ -221,29 +229,32 @@ def exchange_state(engine) -> None:
         slot = c_state.units[uid]
         owner = unit.owner_id  # 0=R, 1=B
 
-        # Toujours écrire l'identifiant et les stats fixes
+        # Toujours écrire TOUTES les données pour garder la SHM cohérente
         slot.id = uid
         slot.team = owner
         slot.owner_peer = owner
         slot.hp_max = int(unit.max_hp)
         slot.alive = 1 if unit.is_alive else 0
+        slot.x = float(unit.position[0])
+        slot.y = float(unit.position[1])
 
         if owner == my_peer:
-            # ── NOTRE unité : envoyer position + HP complet ──
-            slot.x = float(unit.position[0])
-            slot.y = float(unit.position[1])
+            # ── NOTRE unité : toujours envoyer ──
             slot.hp = int(unit.current_hp)
-            slot.dirty = 1  # Toujours envoyer
+            slot.dirty = 1
         else:
-            # ── UNITÉ DISTANTE : envoyer seulement si on l'a endommagée ──
+            # ── UNITÉ DISTANTE ──
+            # Lire le HP actuel du slot AVANT d'écraser
+            current_shm_hp = slot.hp
             python_hp = int(unit.current_hp)
-            if python_hp < slot.hp:
-                # On a infligé des dégâts → écrire le nouveau HP et marquer dirty
-                slot.hp = python_hp
-                slot.alive = 1 if python_hp > 0 else 0
+            
+            # Toujours écrire le HP pour garder la SHM initialisée
+            slot.hp = python_hp
+            
+            # Marquer dirty SEULEMENT si on a infligé des dégâts
+            if current_shm_hp > 0 and python_hp < current_shm_hp:
                 slot.dirty = 1
             else:
-                # Pas de changement de notre part → ne pas renvoyer
                 slot.dirty = 0
 
     try:
