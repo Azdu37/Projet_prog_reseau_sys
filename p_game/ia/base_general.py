@@ -155,8 +155,24 @@ class General:
             return True
         return False
 
-    def attack(self,unit,target):
-        return self.map.attack2(unit , target)
+    def attack(self, unit, target_unit):
+        """
+        Ordonne à une unité d'attaquer une cible.
+        V2 : Gère l'ID du pair réseau pour la demande de propriété.
+        """
+        if not unit or not target_unit:
+            return False
+
+        if unit.is_in_range(target_unit):
+            # 1. On détermine notre ID réseau (0 si on est l'équipe Rouge, 1 si on est Bleu)
+            my_peer_id = 0 if unit.team == 'R' else 1
+            
+            # 2. On appelle la nouvelle fonction d'attaque avec le peer_id
+            # Cela mettra l'unité en état "WAITING_NETWORK" si la cible appartient à l'adversaire
+            unit.attack(target_unit, my_peer_id)
+            return True
+            
+        return False
     
     def attack_in_range(self,unit):
         """
