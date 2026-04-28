@@ -80,6 +80,10 @@ class Engine:
         self.current_turn = 0
         self.is_running = False
         self.winner = None
+        self.winner_team = None
+        self._victory_pending_state = None
+        self._victory_pending_turn = None
+        self.distributed_victory_grace_turns = 60
         self.view = None
         self.pressed_keys = set()
         self.real_tps = 0
@@ -547,20 +551,41 @@ class Engine:
         units_team1 = len([u for u in self.units if u.team == 'R' and u.is_alive])
         units_team2 = len([u for u in self.units if u.team == 'B' and u.is_alive])
 
+        winner_team = None
+        battle_finished = False
+
         # selection du winner gagne si tout les adverse sont mort
         if units_team1 == 0 and units_team2 == 0:
-            self.winner = None
-            self.is_running = False
+            battle_finished = True
         elif units_team1 == 0:
-            self.winner = self.ia2
-            self.is_running = False
+            winner_team = 'B'
+            battle_finished = True
         elif units_team2 == 0:
-            self.winner = self.ia1
-            self.is_running = False
+            winner_team = 'R'
+            battle_finished = True
 
-        if self.current_turn > self.max_turns:
-            self.winner = None
-            self.is_running = False
+        if self.current_turn >= self.max_turns:
+            winner_team = None
+            battle_finished = True
+
+        if not battle_finished:
+            self._victory_pending_state = None
+            self._victory_pending_turn = None
+            return
+
+        if self.is_distributed:
+            pending_state = (winner_team, units_team1, units_team2)
+            if pending_state != self._victory_pending_state:
+                self._victory_pending_state = pending_state
+                self._victory_pending_turn = self.current_turn
+                return
+
+            if self.current_turn - self._victory_pending_turn < self.distributed_victory_grace_turns:
+                return
+
+        self.winner_team = winner_team
+        self.winner = self.ia1 if winner_team == 'R' else self.ia2 if winner_team == 'B' else None
+        self.is_running = False
         pass
 
 
@@ -573,8 +598,9 @@ class Engine:
 
 
         print("\n=== Battle Ended ===")
-        if self.winner:
-            print(f"Winner: {self.winner.name, self.winner.team}")
+        if self.winner_team:
+            team_name = "ROUGE" if self.winner_team == 'R' else "BLEU"
+            print(f"Winner: {team_name} ({self.winner_team})")
         else:
             print("Draw or max turns reached")
         print(f"Total turns: {self.current_turn}")

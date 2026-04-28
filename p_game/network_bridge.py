@@ -239,7 +239,6 @@ def exchange_state(engine) -> None:
             continue
         
         owner = unit.owner_id  # 0=R, 1=B
-
         if owner == my_peer:
             # ── NOTRE unité ──
             # Accepter uniquement les baisses de HP (dégâts infligés par l'adversaire)
@@ -284,6 +283,9 @@ def exchange_state(engine) -> None:
         owner = unit.owner_id  # 0=R, 1=B
 
         # Toujours écrire TOUTES les données pour garder la SHM cohérente
+        previous_hp = slot.hp
+        previous_alive = slot.alive
+
         slot.id = uid
         slot.team = owner
         slot.owner_peer = owner
@@ -305,8 +307,14 @@ def exchange_state(engine) -> None:
             # Toujours écrire le HP pour garder la SHM initialisée
             slot.hp = python_hp
             
-            # Marquer dirty SEULEMENT si on a infligé des dégâts
-            if current_shm_hp > 0 and python_hp < current_shm_hp:
+            # Retransmettre les degats/morts distants: UDP peut perdre le dernier paquet.
+            if (
+                (current_shm_hp > 0 and python_hp < current_shm_hp)
+                or python_hp < int(unit.max_hp)
+                or not unit.is_alive
+                or previous_alive != slot.alive
+                or previous_hp != slot.hp
+            ):
                 slot.dirty = 1
             else:
                 slot.dirty = 0
