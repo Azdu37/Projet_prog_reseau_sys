@@ -1,19 +1,7 @@
-# network_bridge.py
-# V2 — Échange atomique Python ↔ SHM (sans thread listener)
-#
-# Principe :
-#   exchange_state() est appelé à chaque tick du game loop.
-#   1. Lit la SHM (contient les mises à jour réseau écrites par C)
-#   2. Applique les updates distantes aux unités Python
-#   3. Écrit l'état local Python dans la SHM pour que C l'envoie
-#
-# Plus de thread, plus de race conditions.
-
 import ctypes
 import os
 import time
 
-# ── Constantes correspondantes au protocole C ────────────────────────────────
 PROTOCOL_MAGIC   = 0xBABA1234
 PROTOCOL_VERSION = 1
 MAX_UNITS        = 256
@@ -21,7 +9,6 @@ SHM_NAME         = "/battle_state"
 SEM_WRITE_NAME   = "/battle_sem_w"
 SEM_READ_NAME    = "/battle_sem_r"
 
-# ── Définition LibC (POSIX IPC) ──────────────────────────────────────────────
 libc = ctypes.CDLL(None, use_errno=True)
 
 libc.shm_open.argtypes  = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
@@ -44,10 +31,8 @@ libc.sem_post.restype   = ctypes.c_int
 _PROT_READ  = 0x1
 _PROT_WRITE = 0x2
 _MAP_SHARED = 0x01
-_SEM_FAILED = ctypes.c_void_p(-1).value
-_MAP_FAILED = ctypes.c_void_p(-1).value
 
-# ── Structures Ctypes (DOIT correspondre EXACTEMENT à shared/protocol.h) ────
+# Structure mise à jour avec pending_request_from
 class UnitState(ctypes.Structure):
     _fields_ = [
         ("id",         ctypes.c_uint8),
@@ -55,7 +40,8 @@ class UnitState(ctypes.Structure):
         ("owner_peer", ctypes.c_uint8),
         ("alive",      ctypes.c_uint8),
         ("dirty",      ctypes.c_uint8),
-        ("_pad",       ctypes.c_uint8 * 3),
+        ("pending_request_from", ctypes.c_uint8),
+        ("_pad",       ctypes.c_uint8 * 2),
         ("x",          ctypes.c_float),
         ("y",          ctypes.c_float),
         ("hp",         ctypes.c_uint16),
@@ -73,7 +59,6 @@ class GameStateC(ctypes.Structure):
         ("units",      UnitState * MAX_UNITS),
     ]
 
-# ── CLASSE BRIDGE ─────────────────────────────────────────────────────────────
 class POSIXBridge:
     def __init__(self, my_peer_id: int):
         self.my_peer_id = my_peer_id
@@ -90,20 +75,17 @@ class POSIXBridge:
             if fd >= 0: break
             err = ctypes.get_errno()
             if i < tentatives - 1:
-                print(f"[bridge] Attente du processus C (shm_open)... {i+1}/{tentatives}")
                 time.sleep(delai)
             else:
-                raise OSError(err, f"shm_open({SHM_NAME}) échoué. Le C ./c_net tourne-t-il ?")
+                raise OSError(err, f"shm_open({SHM_NAME}) échoué.")
 
         size = ctypes.sizeof(GameStateC)
         map_addr = libc.mmap(None, size, _PROT_READ | _PROT_WRITE, _MAP_SHARED, fd, 0)
         self._sem_w = libc.sem_open(SEM_WRITE_NAME.encode(), 0, 0, 0)
         self._sem_r = libc.sem_open(SEM_READ_NAME.encode(), 0, 0, 0)
-        
         self._fd = fd
         self._map_addr = map_addr
         self._state = ctypes.cast(map_addr, ctypes.POINTER(GameStateC)).contents
-        print(f"[bridge] Connecté à la SHM (peer_id={self.my_peer_id})")
 
     def ecrire(self, snapshot):
         if not self._state: return
@@ -130,92 +112,73 @@ class POSIXBridge:
         if self._fd >= 0: libc.close(self._fd)
 
 
-# ── INSTANCE GLOBALE ──────────────────────────────────────────────────────────
 _bridge = None
 
 def init(player_id: int) -> None:
-    """Appelé par main.py pour s'accrocher à la mémoire IPC POSIX du ./c_net."""
     global _bridge
     _bridge = POSIXBridge(my_peer_id=player_id)
     try:
         _bridge.connecter()
     except Exception as e:
-        print(f"[bridge] Erreur de connexion IPC : {e}")
+        print(f"[bridge] Erreur: {e}")
         _bridge = None
 
 
 def exchange_state(engine) -> None:
-    """
-    Échange atomique avec la SHM — appelé chaque tick du game loop.
-    
-    1. Lit la SHM (mises à jour réseau écrites par le processus C)
-    2. Applique les updates distantes aux unités Python
-    3. Écrit l'état Python dans la SHM pour que C l'envoie en UDP
-    """
-    if not _bridge:
-        return
-
+    if not _bridge: return
     my_peer = _bridge.my_peer_id
 
-    try:
-        c_state = _bridge.lire()
-    except Exception:
-        return
+    try: c_state = _bridge.lire()
+    except Exception: return
 
     units = list(engine.all_units())[:MAX_UNITS]
     
-    # ── PHASE 1 : Lire les mises à jour du réseau depuis la SHM ──────────
+    # ── PHASE 1 : LECTURE DE LA SHM ──
     for unit in units:
         uid = unit.unit_id
-        if uid >= MAX_UNITS:
-            continue
-
+        if uid >= MAX_UNITS: continue
         slot = c_state.units[uid]
+        if slot.hp_max == 0: continue
         
-        # Slot pas encore initialisé → ignorer complètement
-        if slot.hp_max == 0:
-            continue
-        
-        owner = unit.owner_id  # 0=R, 1=B
+        # Init de sécurité
+        if getattr(unit, 'network_owner', None) is None:
+            unit.network_owner = 0 if unit.team == 'R' else 1
 
-        if owner == my_peer:
-            # ── NOTRE unité ──
-            # Accepter uniquement les baisses de HP (dégâts infligés par l'adversaire)
-            # slot.hp > 0 évite de lire un slot non initialisé
+        if unit.network_owner == my_peer:
+            # L'adversaire demande la propriété ?
+            req = slot.pending_request_from
+            if req != 255 and req != my_peer:
+                # On accorde si on n'est pas mort ou en pleine attaque
+                if unit.is_alive and unit.state != "attacking":
+                    unit.network_owner = req
+                    slot.owner_peer = req
+                    slot.pending_request_from = 255
+                    slot.dirty = 1
+                    unit.is_local = False
+                    
+            # Accepter les dégâts distants
             if slot.hp > 0 and slot.hp < unit.current_hp:
                 unit.current_hp = slot.hp
                 unit.get_hit = 0.2
                 if unit.current_hp <= 0:
-                    unit.current_hp = 0
-                    unit.is_alive = False
-                    unit.state = "dead"
-                    unit.target = None
-            # L'adversaire a tué notre unité
-            elif slot.hp == 0 and slot.alive == 0 and unit.is_alive:
-                unit.current_hp = 0
-                unit.is_alive = False
-                unit.state = "dead"
-                unit.target = None
+                    unit.current_hp, unit.is_alive, unit.state = 0, False, "dead"
         else:
-            # ── UNITÉ DISTANTE ──
-            # Mettre à jour la position (l'adversaire la contrôle)
-            # Ne pas appliquer (0,0) qui signifie "pas encore reçu du réseau"
+            # UNITÉ DISTANTE : On a récupéré la propriété !
+            if slot.owner_peer == my_peer:
+                unit.network_owner = my_peer
+                unit.is_local = True
+                unit.pending_request = False
+                
+            # Maj position et HP
             if slot.x != 0.0 or slot.y != 0.0:
                 unit.position = (slot.x, slot.y)
-            
-            # Mettre à jour HP : accepter seulement les baisses (slot.hp > 0 pour éviter init à 0)
             if slot.hp > 0 and slot.hp < unit.current_hp:
                 unit.current_hp = slot.hp
                 unit.get_hit = 0.2
-            
-            # Mort confirmée par le réseau (alive=0 ET hp_max > 0 = slot initialisé)
             if slot.alive == 0 and slot.hp_max > 0 and slot.hp == 0:
-                unit.current_hp = 0
-                unit.is_alive = False
-                unit.state = "dead"
-                unit.target = None
+                unit.current_hp, unit.is_alive, unit.state = 0, False, "dead"
 
-    # ── PHASE 2 : Écrire l'état Python dans la SHM pour le C ──────────────
+    # ── PHASE 2 : ÉCRITURE DANS LA SHM ──
     c_state.magic = PROTOCOL_MAGIC
     c_state.version = PROTOCOL_VERSION
     c_state.my_peer_id = my_peer
@@ -223,47 +186,30 @@ def exchange_state(engine) -> None:
 
     for unit in units:
         uid = unit.unit_id
-        if uid >= MAX_UNITS:
-            continue
-
+        if uid >= MAX_UNITS: continue
         slot = c_state.units[uid]
-        owner = unit.owner_id  # 0=R, 1=B
 
-        # Toujours écrire TOUTES les données pour garder la SHM cohérente
         slot.id = uid
-        slot.team = owner
-        slot.owner_peer = owner
+        slot.team = 0 if unit.team == 'R' else 1
         slot.hp_max = int(unit.max_hp)
         slot.alive = 1 if unit.is_alive else 0
-        slot.x = float(unit.position[0])
-        slot.y = float(unit.position[1])
-
-        if owner == my_peer:
-            # ── NOTRE unité : toujours envoyer ──
-            slot.hp = int(unit.current_hp)
-            slot.dirty = 1
-        else:
-            # ── UNITÉ DISTANTE ──
-            # Lire le HP actuel du slot AVANT d'écraser
-            current_shm_hp = slot.hp
-            python_hp = int(unit.current_hp)
-            
-            # Toujours écrire le HP pour garder la SHM initialisée
-            slot.hp = python_hp
-            
-            # Marquer dirty SEULEMENT si on a infligé des dégâts
-            if current_shm_hp > 0 and python_hp < current_shm_hp:
+        
+        if unit.network_owner == my_peer:
+            slot.owner_peer = my_peer
+            slot.pending_request_from = 255
+            # Marquer dirty si position ou HP change
+            if slot.hp != int(unit.current_hp) or slot.x != float(unit.position[0]) or slot.y != float(unit.position[1]):
+                slot.x, slot.y, slot.hp = float(unit.position[0]), float(unit.position[1]), int(unit.current_hp)
                 slot.dirty = 1
-            else:
-                slot.dirty = 0
+        else:
+            # Demande de propriété envoyée au C
+            if getattr(unit, 'pending_request', False):
+                slot.pending_request_from = my_peer
+                slot.dirty = 1
+                unit.pending_request = False 
 
-    try:
-        _bridge.ecrire(c_state)
-    except Exception:
-        pass
-
+    try: _bridge.ecrire(c_state)
+    except Exception: pass
 
 def shutdown() -> None:
-    """Ferme la connexion SHM."""
-    if _bridge:
-        _bridge.fermer()
+    if _bridge: _bridge.fermer()

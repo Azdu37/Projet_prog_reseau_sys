@@ -195,48 +195,58 @@ class Unit:
             return False
         return True
 
-    # Attack unite 
-    """def attack(self, other_unit):
+    # === V2 : L'attaque réseau sécurisée ===
+    def attack(self, other_unit, my_peer_id):
         if not self.can_attack(other_unit):
-            return 0  # Ne peut pas attaquer
-
-        # commence l'attaque
+            return 0
+            
+        # V2 : Si on ne possède pas la cible, on demande la propriété
+        if getattr(other_unit, 'network_owner', -1) != my_peer_id:
+            self.state = "WAITING_NETWORK"
+            other_unit.pending_request = True
+            return 0  # Aucun dégât infligé pour l'instant !
+            
+        # V2 : On a récupéré la propriété, l'attaque est intègre
         self.state = "attacking"
-
         damage_dealt = other_unit.take_damage(self)
+        self.time_reset()
+        return damage_dealt
 
-        # set cooldown
-        self.time_until_next_attack = self.reload_time
-        return damage_dealt"""
     def time_reset(self):
-            self.time_until_next_attack = self.reload_time
-            self.time_before_next_attack = self.attack_delay
-        # update time 
+        self.time_until_next_attack = self.reload_time
+        self.time_before_next_attack = self.attack_delay
+
     def update(self, time_passed):
-            # Si l'unité est morte, elle ne peut rien faire
-            if self.is_dead():
-                self.is_alive = False
-                self.state = "dead"
+        if getattr(self, 'pending_request', None) is None:
+            self.pending_request = False
+
+        if self.is_dead():
+            self.is_alive = False
+            self.state = "dead"
+            self.target = None
+            self.direction = (0, 0)
+            return
+
+        # Si en attente de la propriété réseau, on fige l'animation d'attaque
+        if self.state == "WAITING_NETWORK":
+            self.direction = (0,0)
+            return
+
+        if self.state =="attacking":
+            self.direction = (0,0)
+            self.time_before_next_attack -= time_passed
+            if self.time_before_next_attack <= 0:
+                self.time_before_next_attack = 0
+                self.state="idle"
+
+        if self.time_until_next_attack > 0:
+            self.time_until_next_attack -= time_passed
+            if self.time_until_next_attack < 0:
+                self.time_until_next_attack = 0
+                
+        if self.state != "moving":
+            self.direction = (0,0)
+        else:
+            if self.state not in ["moving", "attacking" , "reloading"]:
+                self.state = "idle"
                 self.target = None
-                self.direction = (0, 0)
-                return
-
-            if self.state =="attacking":
-                self.direction = (0,0)
-                self.time_before_next_attack -= time_passed
-                if self.time_before_next_attack <= 0:
-                    self.time_before_next_attack = 0
-                    self.state="idle"
-
-            if self.time_until_next_attack > 0:
-                #self.state = "reloading"
-                self.time_until_next_attack -= time_passed
-                if self.time_until_next_attack < 0:
-                    self.time_until_next_attack = 0
-            if self.state != "moving":
-                self.direction = (0,0)
-            else:
-                # si l'unite n'est pas morte, on peut ajouter d'autres comportements ici
-                if self.state not in ["moving", "attacking" , "reloading"]:
-                    self.state = "idle"
-                    self.target = None
