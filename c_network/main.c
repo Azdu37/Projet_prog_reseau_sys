@@ -45,9 +45,8 @@ static void broadcast_dirty_units(GameState *state)
     for (int i = 0; i < state->unit_count; i++) {
         UnitState *u = &state->units[i];
 
-        /* N'envoie que les unités qu'on possède ET qui ont changé */
-        if (u->dirty && u->owner_peer == state->my_peer_id) {
-            printf("[main] Envoi UDP de l'unité %d (dirty=1)...\n", u->id);
+        /* Envoie TOUTE unité dirty (y compris ennemies qu'on a endommagées) */
+        if (u->dirty) {
             net_broadcast_state_update(u, state->my_peer_id);
             u->dirty = 0;   /* acquitté localement */
         }

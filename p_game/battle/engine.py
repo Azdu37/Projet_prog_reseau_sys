@@ -112,7 +112,7 @@ class Engine:
 
     def initialize_units(self):
         """charge la liste d'unite"""
-        uid = 1
+        uid = 0
         for (x, y) in self.game_map.map:
             u = self.game_map.get_unit(x, y)
             u.unit_id = uid
@@ -271,13 +271,16 @@ class Engine:
                 if turn_start >= next_view_time and self.view_type > 0:
                     next_view_time = turn_start + view_frame_time
                     self.update_view()
-                # 3. Vérifier les conditions de victoire
-                self.check_victory()
-                # 4. Passer au tour suivant
-                self.current_turn += 1
-                # 5 mets a jour les unités
+                # 3. Mettre à jour les unités et projectiles
                 self.update_units(1 / 60)
                 self.update_projectiles()
+                # 4. Échange réseau (envoyer notre état + recevoir l'état distant)
+                if self.is_distributed:
+                    self.network_exchange()
+                # 5. Vérifier les conditions de victoire (après réseau)
+                self.check_victory()
+                # 6. Passer au tour suivant
+                self.current_turn += 1
                 # 5. Contrôle du turn rate
                 self.turn_time = time.time() - turn_start
                 if self.view and self.turn_time < max_turn_time:
@@ -378,15 +381,12 @@ class Engine:
         # 0. Synchronisation entrante (mises à jour distantes via thread network_bridge)
         red_alive = 0
         blue_alive = 0
-        state_changed = False
         
         for unit in self.units:
             if not unit.is_alive:
                 continue
             
             # Stockage de l'état précédent pour détection de changement
-            prev_pos = unit.position
-            prev_hp = unit.current_hp
             
             if unit.team == 'R':
                 red_alive += 1
@@ -398,13 +398,8 @@ class Engine:
                     self.ia2.play_turn(unit, self.current_turn)
             
             # Détection de changement d'état (mouvement ou combat)
-            if self.is_distributed:
-                if (unit.team == self.local_team) and (unit.position != prev_pos or unit.current_hp != prev_hp):
-                    state_changed = True
 
         # Objective 2 : Immediate update broadcast on local change
-        if self.is_distributed and state_changed:
-            self.push_local_state()
 
         # Enregistre l'historique pour Lanchester (tous les 10 tours pour ne pas trop alourdir)
         if "lanchester" in self.scenario_name.lower() and self.current_turn % 10 == 0:
@@ -414,33 +409,10 @@ class Engine:
         
         pass
 
-    def push_local_state(self):
-        """Diffuser l'état local via le pont réseau"""
+    def network_exchange(self):
+        """Échange réseau : envoie notre état + reçoit l'état distant via SHM/C/UDP."""
         import network_bridge
-        network_bridge.push_local_update(self)
-
-    def apply_remote_update(self, state):
-        """Version 1: overwrite remote units with received values. No conflict resolution."""
-        if not isinstance(state, dict) or "units" not in state:
-            return
-
-        for u in state["units"]:
-            # Ne pas appliquer si on est l'owner (déjà mis à jour localement)
-            # player_id: R=0, B=1
-            my_id = 0 if self.local_team == 'R' else (1 if self.local_team == 'B' else -1)
-            if u["owner_id"] == my_id and my_id != -1:
-                continue
-
-            existing = self.find_unit(u["unit_id"])
-            if existing:
-                existing.position = (u["x"], u["y"])
-                existing.current_hp = u["hp"]
-                existing.is_alive = existing.current_hp > 0
-                if not existing.is_alive:
-                    existing.state = 'dead'
-            else:
-                # Facultatif pour V1: ajouter l'unité si elle n'existe pas
-                pass
+        network_bridge.exchange_state(self)
 
     def request_network_ownership(self, unit):
         """Demande la propriété réseau d'une unité (protocole de cohérence rudimentaire)."""

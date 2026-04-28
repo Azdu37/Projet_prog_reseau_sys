@@ -167,7 +167,12 @@ class Unit:
     def is_in_range(self, other_unit):
         if self.is_in_tile(other_unit, self.range+1):
             distance_2 = self.distance_to_2(other_unit)
-            return distance_2 <= (self.range + self.size + other_unit.size + 0.1)**2 and distance_2 >= (self.range_min + self.size + other_unit.size)**2
+            max_range_2 = (self.range + self.size + other_unit.size + 0.3) ** 2
+            if self.range_min > 0:
+                min_range_2 = max(0, self.range_min + self.size + other_unit.size - 0.3) ** 2
+            else:
+                min_range_2 = 0
+            return min_range_2 <= distance_2 <= max_range_2
         return False
     
     def is_in_LOS(self,other_unit):
@@ -213,6 +218,8 @@ class Unit:
                 self.is_alive = False
                 self.state = "dead"
                 self.target = None
+                self.direction = (0, 0)
+                return
 
             if self.state =="attacking":
                 self.direction = (0,0)

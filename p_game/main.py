@@ -88,11 +88,9 @@ class BattleCLI:
             # 0=ROUGE, 1=BLEU (comme pour le programme C)
             player_id = 0 if args.local_team == 'R' else (1 if args.local_team == 'B' else 0)
             
-            # 2. Init network bridge (POSIX)
+            # Init network bridge (connexion à la SHM POSIX du processus C)
             network_bridge.init(player_id)
-            network_bridge.start_listener(engine.apply_remote_update)
-            
-            print(f"[NETWORK] Bridge initialisé (peer_id={player_id})")
+            print(f"[NETWORK] Bridge SHM initialisé (peer_id={player_id})")
             time.sleep(0.3)
 
         try:

@@ -9,7 +9,7 @@
 #define PROTOCOL_MAGIC   0xBABA1234u
 #define PROTOCOL_VERSION 1
 
-#define MAX_UNITS        64
+#define MAX_UNITS        256
 #define MAX_PEERS        8
 
 /* Noms IPC (mémoire partagée + sémaphore) */
