@@ -248,9 +248,10 @@ def exchange_state(engine) -> None:
                 unit.get_hit = 0.2
                 if unit.current_hp <= 0:
                     _mark_unit_dead(engine, unit)
-            # L'adversaire a tué notre unité
-            elif slot.hp == 0 and slot.alive == 0 and unit.is_alive:
-                _mark_unit_dead(engine, unit)
+            # V1 volontairement imparfaite : un autre peer peut annoncer la mort
+            # de notre unité, mais sans transfert de propriété cette mort n'est
+            # pas considérée comme authoritative. La même unité peut donc rester
+            # vivante ici et morte ailleurs (cas "zombie" attendu en V1).
         else:
             # ── UNITÉ DISTANTE ──
             # Mettre à jour la position (l'adversaire la contrôle)
@@ -263,9 +264,10 @@ def exchange_state(engine) -> None:
                 unit.current_hp = slot.hp
                 unit.get_hit = 0.2
             
-            # Mort confirmée par le réseau (alive=0 ET hp_max > 0 = slot initialisé)
-            if slot.alive == 0 and slot.hp_max > 0 and slot.hp == 0:
-                _mark_unit_dead(engine, unit)
+            # V1 volontairement imparfaite : on ne supprime pas une unité distante
+            # uniquement parce que le réseau annonce sa mort. Un paquet perdu,
+            # retardé ou écrasé peut laisser un peer avec une unité morte et
+            # l'autre avec une unité encore active.
 
     # ── PHASE 2 : Écrire l'état Python dans la SHM pour le C ──────────────
     c_state.magic = PROTOCOL_MAGIC
