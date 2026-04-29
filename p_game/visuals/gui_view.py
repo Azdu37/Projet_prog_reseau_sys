@@ -89,10 +89,12 @@ class GUI_view:
 
         self.all_units : list[Unit] = None
 
-        # Detecteur de zombies
-        self.dead_unit_ids : set = set()       # IDs des unites qu'on a vues mourir
-        self.zombie_count : int = 0            # Nb de zombies detectes au total
-        self.zombie_font = pygame.font.SysFont("monospace", 16, bold=True)
+        # ── Détecteur de zombies (vue) ──
+        # Syncé avec engine._dead_unit_ids via engine.zombie_count / engine.zombie_events
+        self.zombie_font = pygame.font.SysFont("monospace", 15, bold=True)
+        self._zombie_blink_timer = 0.0   # secondes depuis le dernier zombie
+        self._zombie_blink_on = True     # état du clignotement
+        self._zombie_count_seen = 0      # dernier zombie_count vu du moteur
 
     def move(self, dx : int, dy : int):
         """Permet de deplacer l'affichage de la map (appel apres detection de ZQSD)"""
@@ -288,45 +290,98 @@ class GUI_view:
             elif (projectile.shooter.type == "S"):
                 pygame.draw.line(self.screen, (50,50,50), (proj_x, proj_y), (proj_x+proj_dir_x*self.size_projectile_javelot*2.5, proj_y+proj_dir_y*self.size_projectile_javelot*2.5), round(self.size_projectile_javelot/4),)
 
-    def detect_zombies(self, all_units_raw):
-        """Detecte les unites mortes qui sont revenues a la vie (zombies)."""
-        for unit in all_units_raw:
-            uid = id(unit)  # identifiant Python unique de l'objet unite
-            if not unit.is_alive:
-                # L'unite est morte : on l'enregistre dans la liste des morts
-                self.dead_unit_ids.add(uid)
-            else:
-                # L'unite est vivante : est-elle dans la liste des morts ?
-                if uid in self.dead_unit_ids:
-                    # Elle etait morte et elle est de retour -> ZOMBIE !
-                    self.zombie_count += 1
-                    # On la retire de la liste pour ne pas la compter deux fois de suite
-                    self.dead_unit_ids.discard(uid)
+    def detect_zombies(self, engine):
+        """
+        Synchronise l'état d'alerte visuel avec les données du moteur.
+        Fait clignoter la barre si un nouveau zombie vient d'être détecté.
+        """
+        # Le moteur tient le vrai compteur ; on regarde juste s'il a augmenté
+        engine_count = getattr(engine, 'zombie_count', 0)
+        if engine_count > self._zombie_count_seen:
+            # Nouveau zombie : activer le clignotement pendant 5 s
+            self._zombie_blink_timer = 5.0
+            self._zombie_count_seen = engine_count
 
-    def display_zombie_detector(self):
-        """Affiche le compteur de zombies en bas de l'ecran."""
-        bar_height = 28
+    def _draw_zombie_marker(self, screen, proj_x, proj_y, unit):
+        """
+        Dessine un marqueur visuel vert fluo sur l'unité zombie :
+          - Halo vert semi-transparent
+          - Croix verte
+          - Texte '☠' au-dessus
+        """
+        # Halo vert fluo (cercle)
+        halo_r = max(18, int(unit.size * self.tile_h * 2.2))
+        halo_surf = pygame.Surface((halo_r * 2, halo_r * 2), pygame.SRCALPHA)
+        pygame.draw.circle(halo_surf, (50, 255, 50, 90), (halo_r, halo_r), halo_r)
+        pygame.draw.circle(halo_surf, (50, 255, 50, 200), (halo_r, halo_r), halo_r, 3)
+        screen.blit(halo_surf, (int(proj_x) - halo_r, int(proj_y) - halo_r))
+
+        # Croix verte
+        arm = halo_r - 4
+        pygame.draw.line(screen, (0, 255, 0), (int(proj_x) - arm, int(proj_y)), (int(proj_x) + arm, int(proj_y)), 3)
+        pygame.draw.line(screen, (0, 255, 0), (int(proj_x), int(proj_y) - arm), (int(proj_x), int(proj_y) + arm), 3)
+
+        # Texte ZOMBIE au-dessus
+        lbl = self.zombie_font.render("☠ ZOMBIE", True, (0, 255, 80))
+        screen.blit(lbl, (int(proj_x) - lbl.get_width() // 2, int(proj_y) - halo_r - lbl.get_height() - 2))
+
+    def display_zombie_detector(self, engine, fps):
+        """Affiche la barre d'alerte zombie en bas de l'écran."""
+        import time as _time
+
+        # Mise à jour du timer de clignotement
+        self.detect_zombies(engine)
+        zombie_count = getattr(engine, 'zombie_count', 0)
+        zombie_events = getattr(engine, 'zombie_events', [])
+
+        if self._zombie_blink_timer > 0 and fps > 0:
+            self._zombie_blink_timer -= 1.0 / fps
+            # Clignotement 4 Hz
+            phase = int(self._zombie_blink_timer * 4) % 2
+            self._zombie_blink_on = (phase == 0)
+        else:
+            self._zombie_blink_on = True
+
+        bar_height = 32
         bar_y = self.max_size[1] - bar_height
-        bar_color = (40, 10, 10)
+
+        # Fond
+        if zombie_count > 0 and self._zombie_blink_on:
+            bar_color = (80, 15, 5)
+        elif zombie_count > 0:
+            bar_color = (50, 8, 3)
+        else:
+            bar_color = (20, 35, 20)
         pygame.draw.rect(self.screen, bar_color, (0, bar_y, self.max_size[0], bar_height))
 
-        if self.zombie_count == 0:
-            label = "  ZOMBIE DETECTOR : aucun zombie detecte"
-            color = (150, 220, 150)
+        # Texte principal
+        if zombie_count == 0:
+            label = "  ☠ ZOMBIE DETECTOR : aucun zombie détecté"
+            color = (100, 210, 100)
         else:
-            label = f"  ZOMBIE DETECTOR : {self.zombie_count} zombie(s) detecte(s) !"
-            color = (255, 80, 0)
+            label = f"  ☠ ZOMBIE DETECTOR : {zombie_count} zombie(s) détecté(s) !"
+            color = (255, 100, 20) if self._zombie_blink_on else (200, 60, 10)
 
         text = self.zombie_font.render(label, True, color)
         self.screen.blit(text, (0, bar_y + (bar_height - text.get_height()) // 2))
 
-    def display_units(self, map : Map, fps, all_units_raw):
+        # Historique des derniers événements (5 max) affiché à droite
+        recent = zombie_events[-5:]
+        if recent:
+            parts = [f"T{ev[0]} #{ ev[1]}({ev[2]})" for ev in recent]
+            hist_text = "  |  ".join(parts)
+            hist_surf = self.zombie_font.render(hist_text, True, (255, 200, 80))
+            x_hist = self.max_size[0] - hist_surf.get_width() - 8
+            self.screen.blit(hist_surf, (x_hist, bar_y + (bar_height - hist_surf.get_height()) // 2))
+
+        # Ligne séparatrice
+        pygame.draw.line(self.screen, (80, 80, 80), (0, bar_y), (self.max_size[0], bar_y), 1)
+
+    def display_units(self, map : Map, fps, all_units_raw, engine=None):
         """ Affichage unités """
-        # Detection des zombies avant le filtrage
-        self.detect_zombies(all_units_raw)
         # Retirer les unités mortes de la liste d'affichage
         self.all_units = [u for u in self.all_units if u.is_alive]
-        # On trie les unités pour qu'elle soit dans le bon ordre d'affichage isometrique
+        # On trie les unités pour qu'elle soit dans le bon ordre d'affichage isométrique
         self.all_units.sort(key=lambda u: u.position[0] + u.position[1])
         for unit in self.all_units: 
             (x, y) = unit.position
@@ -450,6 +505,10 @@ class GUI_view:
                         (target_proj_x, target_proj_y) = ((target_iso[0]+self.size_map[0]//2-self.offset[0])*self.tile_w, (target_iso[1]+self.size_map[1]//2-self.offset[1])*self.tile_h)
                         
                         pygame.draw.line(self.screen, color_bar, (proj_x, proj_y), (target_proj_x, target_proj_y))
+
+                # Marqueur zombie visible sur l'unité en jeu
+                if getattr(unit, 'is_zombie', False):
+                    self._draw_zombie_marker(self.screen, proj_x, proj_y, unit)
             
             
 
@@ -482,7 +541,12 @@ class GUI_view:
                 iso_pos = (centre_position[0]-centre_position[1], (centre_position[0]+centre_position[1])/2)
                 proj_pos = (iso_pos[0]+self.max_size[0]-self.size_mini_map[0], iso_pos[1]+self.size_map[1]//2+self.max_size[1]-self.size_mini_map[1])
                 
-                pygame.draw.circle(self.screen, color, proj_pos, 3)
+                # Les zombies apparaissent en vert fluo sur la mini-map
+                if getattr(unit, 'is_zombie', False):
+                    color = (0, 255, 80)
+                    pygame.draw.circle(self.screen, color, proj_pos, 5)
+                else:
+                    pygame.draw.circle(self.screen, color, proj_pos, 3)
         
         # Cadre blanc indiquant la position de l'affichage
         pygame.draw.rect(self.screen, (255, 255, 255), (self.offset[0]*self.size_mini_map[0]/self.size_map[0]+self.max_size[0]-1.5*self.size_mini_map[0], self.offset[1]*self.size_mini_map[1]/self.size_map[1]+self.max_size[1]-self.size_mini_map[1], self.size_mini_map[0]*self.max_size[0]/self.size_map[0]/self.tile_w, self.size_mini_map[1]*self.max_size[1]/self.size_map[1]/self.tile_h), 3)
@@ -564,7 +628,7 @@ class GUI_view:
             self.screen.blit(text, ((self.max_size[0]-text.get_size()[0])//2, (self.max_size[1]-text.get_size()[1])//2))
 
 
-    def display(self, map: Map, battle_infos: dict):
+    def display(self, map: Map, battle_infos: dict, engine=None):
         """ Return True si il faut continuer a afficher et False si il faut quitter le gui"""
         all_units_raw = [unit for unit in map.map.values() if unit is not None]
         self.all_units = list(all_units_raw)
@@ -573,7 +637,7 @@ class GUI_view:
         
         self.display_background()
 
-        self.display_units(map, battle_infos["turn_fps"], all_units_raw)
+        self.display_units(map, battle_infos["turn_fps"], all_units_raw, engine)
 
         self.display_projectiles(map)
         
@@ -581,7 +645,7 @@ class GUI_view:
         
         self.display_game_infos(battle_infos)
 
-        self.display_zombie_detector()
+        self.display_zombie_detector(engine, battle_infos["turn_fps"])
 
         pygame.display.flip()
 

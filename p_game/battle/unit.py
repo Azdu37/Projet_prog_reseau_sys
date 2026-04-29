@@ -35,6 +35,7 @@ class Unit:
 
         #l'état de l'unité
         self.is_alive = True
+        self.is_zombie = False  # True si cette unite est un zombie (morte puis revenue)
         self.state = "idle"  # idle, moving, attacking, dead
         self.target = None  # cible actuelle de l'unité
 
@@ -75,6 +76,7 @@ class Unit:
         self.max_hp = stats["hp"]
         self.current_hp = stats["hp"]
         self.is_alive = True
+        self.is_zombie = False  # True si cette unite est un zombie (morte puis revenue)
         self.state = "alive"
 
         # Stats avancées
@@ -110,6 +112,7 @@ class Unit:
     def die(self):
         self.current_hp = 0
         self.is_alive = False
+        self.is_zombie = False  # On remet a False : si elle revit, l'engine la marquera zombie
         self.state = "dead"
         self.target = None
         self.direction = (0, 0)

@@ -111,6 +111,14 @@ class Engine:
         self.time_turn = 0
         self.units = []
 
+        # ── Détecteur de zombies (moteur) ──
+        # Ensemble des unit_id des unités qu'on a vues mourir au moins une fois
+        self._dead_unit_ids: set = set()
+        # Nombre total de zombies détectés depuis le début de la partie
+        self.zombie_count: int = 0
+        # Liste des événements zombie: [(turn, unit_id, team), ...]
+        self.zombie_events: list = []
+
     def initialize_units(self):
         """charge la liste d'unite"""
         uid = 0
@@ -321,12 +329,39 @@ class Engine:
 
 
         
-    def update_units(self,time_per_tick):
+    def detect_zombie_in_engine(self, unit):
+        """
+        Appelé pour chaque unité vivante : vérifie si elle était préalablement
+        marquée comme morte (zombie réseau ou incohérence moteur).
+        Met unit.is_zombie = True et log l'événement si c'est le cas.
+        """
+        uid = getattr(unit, 'unit_id', id(unit))
+        if uid in self._dead_unit_ids:
+            # Elle était morte et elle est de retour -> ZOMBIE !
+            if not getattr(unit, 'is_zombie', False):
+                unit.is_zombie = True
+                self.zombie_count += 1
+                event = (self.current_turn, uid, unit.team)
+                self.zombie_events.append(event)
+                print(
+                    f"[ZOMBIE DETECTE] Tour {self.current_turn} | "
+                    f"Unite #{uid} equipe {unit.team} est revenue a la vie !"
+                )
+            # On la retire des morts connus pour ne pas la recompter tant qu'elle reste en vie
+            self._dead_unit_ids.discard(uid)
+
+    def update_units(self, time_per_tick):
         for unit in self.units:
             unit.update(time_per_tick)
-            # Retirer les unités mortes de la carte pour qu'elles disparaissent
             if not unit.is_alive:
+                # Enregistre la mort dans le set du détecteur
+                uid = getattr(unit, 'unit_id', id(unit))
+                self._dead_unit_ids.add(uid)
+                # Retirer les unités mortes de la carte
                 self.game_map.remove_unit_instance(unit)
+            else:
+                # Vérification zombie : unité vivante qui était dans la liste des morts
+                self.detect_zombie_in_engine(unit)
 
     def update_projectiles(self):
             self.game_map.update_projectiles()
@@ -457,7 +492,7 @@ class Engine:
 
     def update_view(self):
         """Met à jour l'affichage pour refléter l'état actuel"""
-        a = self.view.display(self.game_map, self.get_game_info())
+        a = self.view.display(self.game_map, self.get_game_info(), engine=self)
         if self.view_type == 2:
             if a["change_view"]:
                 self.change_view(a["change_view"])
