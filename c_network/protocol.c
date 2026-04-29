@@ -46,7 +46,7 @@ void proto_send_hello(uint8_t my_peer_id)
     msg.sender_id = my_peer_id;
     msg.unit_id   = 0;
     net_broadcast(&msg);
-    printf("[proto] MSG_HELLO diffuse (peer_id=%d)\n", my_peer_id);
+    printf("[DEMO-SHAKE] Peer %d envoie HELLO\n", my_peer_id);
 }
 
 /* ── Traitement du handshake sur réception ──────────────────────────────────── */
@@ -69,8 +69,8 @@ static void handle_hello(const NetMessage *msg, GameState *state)
     }
 
     g_peers_said_hello |= bit;
-    printf("[proto] Recu MSG_HELLO de peer %d (%d/%d pair(s) prets)\n",
-           msg->sender_id, __builtin_popcount(g_peers_said_hello), g_expected_peers);
+    printf("[DEMO-SHAKE] Peer %d reçu HELLO de peer %d (%d/%d pairs)\n",
+           state->my_peer_id, msg->sender_id, __builtin_popcount(g_peers_said_hello), g_expected_peers);
 
     /* Répondre avec MSG_READY */
     NetMessage reply;
@@ -79,13 +79,13 @@ static void handle_hello(const NetMessage *msg, GameState *state)
     reply.type      = MSG_READY;
     reply.sender_id = state->my_peer_id;
     net_send_to(msg->sender_id, &reply);
-    printf("[proto] MSG_READY envoye a peer %d\n", msg->sender_id);
+    printf("[DEMO-SHAKE] Peer %d envoie READY à peer %d\n", state->my_peer_id, msg->sender_id);
 
     /* Si tous les pairs attendus ont dit bonjour → go */
     if (__builtin_popcount(g_peers_said_hello) >= g_expected_peers) {
         g_handshake_done    = 1;
         state->both_ready   = 1;
-        printf("[proto] Handshake complet ! La bataille peut commencer.\n");
+        printf("[DEMO-SHAKE] ✓ Handshake complet (peer %d) ! La bataille commence.\n", state->my_peer_id);
     }
 }
 
@@ -103,14 +103,14 @@ static void handle_ready(const NetMessage *msg, GameState *state)
     int bit = (1 << msg->sender_id);
     if (!(g_peers_said_hello & bit)) {
         g_peers_said_hello |= bit;
-        printf("[proto] Recu MSG_READY de peer %d (traite comme HELLO implicite)\n",
-               msg->sender_id);
+        printf("[DEMO-SHAKE] Peer %d reçu READY de peer %d (Hello implicite)\n",
+               state->my_peer_id, msg->sender_id);
     }
 
     if (__builtin_popcount(g_peers_said_hello) >= g_expected_peers) {
         g_handshake_done    = 1;
         state->both_ready   = 1;
-        printf("[proto] Handshake complet via MSG_READY !\n");
+        printf("[DEMO-SHAKE] ✓ Handshake complet via READY (peer %d) !\n", state->my_peer_id);
     }
 }
 
@@ -154,10 +154,14 @@ void proto_handle_incoming(const NetMessage *msg, GameState *local_state)
 
         if (local_unit->owner_peer == local_state->my_peer_id && local_unit->hp_max > 0) {
             if (msg->unit.hp < local_unit->hp) {
+                printf("[DEMO-SYNC] Peer %d: reçu dégâts unite %d (%d → %d HP)\n",
+                       local_state->my_peer_id, uid, local_unit->hp, msg->unit.hp);
                 local_unit->hp    = msg->unit.hp;
                 local_unit->alive = (local_unit->hp > 0) ? 1 : 0;
             }
         } else {
+            printf("[DEMO-SYNC] Peer %d: reçu état unite %d @(%.1f,%.1f) owner=%d\n",
+                   local_state->my_peer_id, uid, msg->unit.x, msg->unit.y, msg->unit.owner_peer);
             local_unit->id         = msg->unit.id;
             local_unit->team       = msg->unit.team;
             local_unit->owner_peer = msg->unit.owner_peer;
@@ -180,7 +184,8 @@ void proto_handle_incoming(const NetMessage *msg, GameState *local_state)
         UnitState *local_unit = &local_state->units[uid];
 
         if (local_unit->owner_peer == local_state->my_peer_id) {
-            printf("[proto] Cede propriete unite %d a peer %d\n", uid, msg->sender_id);
+            printf("[DEMO-OWN] ✓ Peer %d: ACCORDE propriété unite %d à peer %d\n",
+                   local_state->my_peer_id, uid, msg->sender_id);
             local_unit->owner_peer = msg->sender_id;
             local_unit->dirty      = 0;
 
@@ -192,6 +197,9 @@ void proto_handle_incoming(const NetMessage *msg, GameState *local_state)
             grant.unit_id   = uid;
             memcpy(&grant.unit, local_unit, sizeof(UnitState));
             net_send_to(msg->sender_id, &grant);
+        } else {
+            printf("[DEMO-OWN] ✗ Peer %d: REFUSE propriété unite %d (propriétaire: peer %d)\n",
+                   local_state->my_peer_id, uid, local_unit->owner_peer);
         }
         break;
     }
@@ -203,7 +211,8 @@ void proto_handle_incoming(const NetMessage *msg, GameState *local_state)
         if (uid >= MAX_UNITS) break;
 
         UnitState *local_unit = &local_state->units[uid];
-        printf("[proto] Recu propriete unite %d de peer %d\n", uid, msg->sender_id);
+        printf("[DEMO-OWN] ✓ Peer %d: REÇOIT propriété unite %d de peer %d\n",
+               local_state->my_peer_id, uid, msg->sender_id);
         memcpy(local_unit, &msg->unit, sizeof(UnitState));
         local_unit->owner_peer = local_state->my_peer_id;
         local_unit->dirty      = 1;

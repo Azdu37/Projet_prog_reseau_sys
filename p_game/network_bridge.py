@@ -244,7 +244,7 @@ def exchange_state(engine) -> None:
         if unit.is_local:
             unit._network_synced = True
             if old_owner != my_peer:
-                print(f"[bridge] Propriété ACQUISE pour unité {uid}")
+                print(f"[DEMO-SYNC] ✓ Propriété ACQUISE: unit #{uid} (peer {old_owner} → {my_peer})")
                 unit.position = (slot.x, slot.y)
                 unit.current_hp = slot.hp
                 unit.is_alive = (slot.alive != 0)
@@ -261,7 +261,7 @@ def exchange_state(engine) -> None:
                     unit.target = None
         else:
             if old_owner == my_peer:
-                print(f"[bridge] Propriété PERDUE pour unité {uid}")
+                print(f"[DEMO-SYNC] ✗ Propriété PERDUE: unit #{uid} (owner → peer {slot.owner_peer})")
 
             unit.position = (slot.x, slot.y)
 
@@ -298,6 +298,7 @@ def exchange_state(engine) -> None:
         if getattr(unit, 'pending_ownership_request', False):
             unit.pending_ownership_request = False
             if not unit.is_local:
+                print(f"[DEMO-REQ] Peer {my_peer}: DEMANDE propriété unit #{uid}")
                 slot.id    = uid
                 slot.dirty = 2
                 continue
@@ -314,6 +315,7 @@ def exchange_state(engine) -> None:
             slot.y          = float(unit.position[1])
             slot.hp         = int(unit.current_hp)
             slot.dirty      = 1
+            print(f"[DEMO-BROADCAST] Peer {my_peer}: BROADCAST unit #{uid} @({slot.x:.0f},{slot.y:.0f}) HP={slot.hp}")
         else:
             if slot.hp_max == 0:
                 slot.id         = uid

@@ -44,11 +44,14 @@ static void broadcast_dirty_units(GameState *state)
         UnitState *u = &state->units[i];
 
         if (u->dirty == 1) {
+            printf("[DEMO-NET] Peer %d: BROADCAST unit %d @(%.1f,%.1f) HP=%d owner=%d\n",
+                   state->my_peer_id, u->id, u->x, u->y, u->hp, u->owner_peer);
             net_broadcast_state_update(u, state->my_peer_id);
             u->dirty = 0;
         }
         else if (u->dirty == 2) {
-            printf("[main] Envoi requete propriete pour unite %d\n", u->id);
+            printf("[DEMO-NET] Peer %d: DEMANDE propriété unit %d\n",
+                   state->my_peer_id, u->id);
             NetMessage msg;
             memset(&msg, 0, sizeof(msg));
             msg.magic     = PROTOCOL_MAGIC;

@@ -427,7 +427,9 @@ class Engine:
                     if self.is_distributed and not getattr(unit, 'is_local', True):
                         self.request_network_ownership(unit)
                     else:
+                        print(f"[DEMO-DECIDE] IA ROUGE décide pour unit #{unit.unit_id} ({unit.type}@{unit.position})")
                         self.ia1.play_turn(unit, self.current_turn)
+                        print(f"[DEMO-ACTION] Exécution: unit #{unit.unit_id} déplacé vers {unit.position}")
             elif unit.team == 'B':
                 blue_alive += 1
                 if not self.is_distributed or self.local_team == 'B':
@@ -435,7 +437,9 @@ class Engine:
                     if self.is_distributed and not getattr(unit, 'is_local', True):
                         self.request_network_ownership(unit)
                     else:
+                        print(f"[DEMO-DECIDE] IA BLEUE décide pour unit #{unit.unit_id} ({unit.type}@{unit.position})")
                         self.ia2.play_turn(unit, self.current_turn)
+                        print(f"[DEMO-ACTION] Exécution: unit #{unit.unit_id} déplacé vers {unit.position}")
             
             # Détection de changement d'état (mouvement ou combat)
 

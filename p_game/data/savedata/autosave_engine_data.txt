@@ -1,1 +1,1 @@
-stest7,Major_DAFT,BrainDead
+stest7,Basic_IA,BrainDead
