@@ -156,6 +156,7 @@ void proto_handle_incoming(const NetMessage *msg, GameState *local_state)
             if (msg->unit.hp < local_unit->hp) {
                 local_unit->hp    = msg->unit.hp;
                 local_unit->alive = (local_unit->hp > 0) ? 1 : 0;
+                memcpy(local_unit->_pad, msg->unit._pad, sizeof(local_unit->_pad));
             }
         } else {
             local_unit->id         = msg->unit.id;
@@ -166,6 +167,7 @@ void proto_handle_incoming(const NetMessage *msg, GameState *local_state)
             local_unit->y          = msg->unit.y;
             local_unit->hp         = msg->unit.hp;
             local_unit->hp_max     = msg->unit.hp_max;
+            memcpy(local_unit->_pad, msg->unit._pad, sizeof(local_unit->_pad));
         }
         local_unit->dirty = 0;
         break;

@@ -14,6 +14,10 @@ class Map:
         self.q = q
         self.map = defaultdict(lambda: None, {})
         self.projectiles = []
+        self.is_distributed = False
+
+    def set_distributed_mode(self, enabled):
+        self.is_distributed = bool(enabled)
 
     def distance(self, pos1, pos2):
         """Calcule la distance entre deux positions"""
@@ -382,6 +386,7 @@ class Map:
 
     def fire_projectile(self, shooter, target):
         type = shooter.type
+        self.register_projectile_event(shooter, target)
 
         if target.direction == (0, 0):
 
@@ -464,6 +469,25 @@ class Map:
     def add_Lance(self, shooter, target_pos, distance):
         """Permet d'ajouter une flèche à la carte aux coordonnées (x, y)"""
         self.projectiles.append(Projectile().lance(shooter, target_pos, distance))
+
+    def register_projectile_event(self, shooter, target):
+        if not self.is_distributed or not getattr(shooter, 'is_local', True):
+            return
+        if shooter.type not in ('C', 'S') or not hasattr(target, 'unit_id'):
+            return
+        shooter._network_projectile_seq = (getattr(shooter, '_network_projectile_seq', 0) % 255) + 1
+        shooter._network_projectile_target_id = int(target.unit_id)
+
+    def spawn_visual_projectile(self, shooter, target):
+        if shooter.type not in ('C', 'S') or not target or not target.is_alive:
+            return
+        distance = self.distance(shooter.position, target.position)
+        if distance <= 1e-6:
+            return
+        if shooter.type == 'C':
+            self.add_Arrow(shooter, target.position, distance)
+        elif shooter.type == 'S':
+            self.add_Lance(shooter, target.position, distance)
 
     def update_projectiles(self):
         """checks for hits. if none, continues trajectory"""

@@ -144,6 +144,7 @@ class Engine:
 
         print(f"Loading scenario: {self.scenario_name}")
         self.game_map = Map()
+        self.game_map.set_distributed_mode(self.is_distributed)
         Map.load(self.game_map, self.scenario_name)
 
 

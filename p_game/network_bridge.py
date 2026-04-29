@@ -206,6 +206,17 @@ def request_ownership(unit) -> bool:
     return True
 
 
+def _spawn_remote_projectile_visual(engine, shooter, event_seq, target_id):
+    if event_seq == 0 or shooter.is_local or shooter.type not in ('C', 'S'):
+        return
+    if getattr(shooter, '_last_remote_projectile_seq', 0) == event_seq:
+        return
+    target = engine.find_unit(target_id)
+    if target and target.team != shooter.team:
+        engine.game_map.spawn_visual_projectile(shooter, target)
+    shooter._last_remote_projectile_seq = event_seq
+
+
 def exchange_state(engine) -> None:
     """
     Échange atomique avec la SHM — appelé chaque tick du game loop.
@@ -240,6 +251,8 @@ def exchange_state(engine) -> None:
         old_owner = unit.owner_id
         unit.owner_id = slot.owner_peer
         unit.is_local = (unit.owner_id == my_peer)
+        projectile_seq = int(slot._pad[0])
+        projectile_target_id = int(slot._pad[1])
 
         if unit.is_local:
             unit._network_synced = True
@@ -279,6 +292,8 @@ def exchange_state(engine) -> None:
             if slot.hp > 0:
                 unit._network_synced = True
 
+        _spawn_remote_projectile_visual(engine, unit, projectile_seq, projectile_target_id)
+
     # ── PHASE 2 : Écrire l'état Python dans la SHM pour le C ──────────────
     c_state.magic      = PROTOCOL_MAGIC
     c_state.version    = PROTOCOL_VERSION
@@ -313,6 +328,9 @@ def exchange_state(engine) -> None:
             slot.x          = float(unit.position[0])
             slot.y          = float(unit.position[1])
             slot.hp         = int(unit.current_hp)
+            slot._pad[0]    = int(getattr(unit, '_network_projectile_seq', 0)) & 0xFF
+            slot._pad[1]    = int(getattr(unit, '_network_projectile_target_id', 255)) & 0xFF
+            slot._pad[2]    = 0
             slot.dirty      = 1
         else:
             if slot.hp_max == 0:
