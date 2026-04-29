@@ -92,12 +92,95 @@ if ! kill -0 "$C_PID" 2>/dev/null; then
 fi
 echo "  ✓ SHM prête."
 
+echo "  ⏳ Attente de l'autre PC avant de lancer le jeu..."
+cd "$ROOT/p_game"
+if ! python3 - <<'PY'
+import ctypes
+import os
+import sys
+import time
+
+SHM_NAME = os.getenv("SHM_NAME", "/battle_state")
+
+libc = ctypes.CDLL(None, use_errno=True)
+libc.shm_open.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
+libc.shm_open.restype = ctypes.c_int
+libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int,
+                      ctypes.c_int, ctypes.c_int, ctypes.c_long]
+libc.mmap.restype = ctypes.c_void_p
+libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+libc.munmap.restype = ctypes.c_int
+libc.close.argtypes = [ctypes.c_int]
+libc.close.restype = ctypes.c_int
+
+_PROT_READ = 0x1
+_MAP_SHARED = 0x01
+
+class UnitState(ctypes.Structure):
+    _fields_ = [
+        ("id", ctypes.c_uint8),
+        ("team", ctypes.c_uint8),
+        ("owner_peer", ctypes.c_uint8),
+        ("alive", ctypes.c_uint8),
+        ("dirty", ctypes.c_uint8),
+        ("_pad", ctypes.c_uint8 * 3),
+        ("x", ctypes.c_float),
+        ("y", ctypes.c_float),
+        ("hp", ctypes.c_uint16),
+        ("hp_max", ctypes.c_uint16),
+    ]
+
+class GameStateC(ctypes.Structure):
+    _fields_ = [
+        ("magic", ctypes.c_uint32),
+        ("version", ctypes.c_uint16),
+        ("unit_count", ctypes.c_uint8),
+        ("my_peer_id", ctypes.c_uint8),
+        ("tick", ctypes.c_uint32),
+        ("both_ready", ctypes.c_uint8),
+        ("_pad", ctypes.c_uint8 * 3),
+        ("units", UnitState * 256),
+    ]
+
+fd = libc.shm_open(SHM_NAME.encode(), os.O_RDONLY, 0)
+if fd < 0:
+    err = ctypes.get_errno()
+    raise OSError(err, f"shm_open({SHM_NAME})")
+
+size = ctypes.sizeof(GameStateC)
+addr = libc.mmap(None, size, _PROT_READ, _MAP_SHARED, fd, 0)
+if addr in (ctypes.c_void_p(-1).value, None):
+    err = ctypes.get_errno()
+    libc.close(fd)
+    raise OSError(err, "mmap")
+
+try:
+    state = ctypes.cast(addr, ctypes.POINTER(GameStateC)).contents
+    deadline = time.time() + 120.0
+    while time.time() < deadline:
+        if state.both_ready:
+            print("  ✓ Adversaire connecté.")
+            sys.exit(0)
+        time.sleep(0.25)
+    print("  ✗ Timeout: l'adversaire ne s'est pas connecté.")
+    sys.exit(1)
+finally:
+    libc.munmap(addr, size)
+    libc.close(fd)
+PY
+then
+    echo "  ✗ Abandon du lancement."
+    kill "$C_PID" 2>/dev/null || true
+    cd "$ROOT/c_network"
+    make clean-ipc -s > /dev/null 2>&1 || true
+    exit 1
+fi
+
 # ── Étape 3 : Jeu Python ────────────────────────────────────────────────────
 echo ""
 echo "▶ [3/3] Lancement du jeu Python..."
 echo ""
 
-cd "$ROOT/p_game"
 python3 main.py run "$SCENARIO" "$IA_ROUGE" "$IA_BLEUE" \
     --distributed --local-team "$LOCAL_TEAM"
 

@@ -269,8 +269,8 @@ def exchange_state(engine) -> None:
     c_state.version    = PROTOCOL_VERSION
     c_state.my_peer_id = my_peer
     c_state.unit_count = len(units)
-    # On préserve both_ready pour ne pas l'écraser à 0
-    c_state.both_ready = 1
+    # both_ready est piloté uniquement par le processus C.
+    # On conserve la valeur lue depuis la SHM.
 
     for unit in units:
         uid = unit.unit_id
