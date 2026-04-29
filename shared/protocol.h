@@ -60,8 +60,9 @@ typedef struct __attribute__((packed)) {
     uint8_t   unit_count;
     uint8_t   my_peer_id;
     uint32_t  tick;
-    uint8_t   both_ready;   /* 0 = en attente, 1 = handshake terminé */
-    uint8_t   _pad[3];
+    uint8_t   both_ready;    /* 0 = en attente, 1 = handshake terminé */
+    uint8_t   python_ready;  /* 0 = Python pas prêt, 1 = Python prêt   */
+    uint8_t   _pad[2];
     UnitState units[MAX_UNITS];
 } GameState;
 

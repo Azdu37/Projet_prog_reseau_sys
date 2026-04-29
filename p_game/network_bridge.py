@@ -67,8 +67,9 @@ class GameStateC(ctypes.Structure):
       uint8   unit_count
       uint8   my_peer_id
       uint32  tick
-      uint8   both_ready   ← NOUVEAU
-      uint8   _pad[3]
+      uint8   both_ready
+      uint8   python_ready
+      uint8   _pad[2]
       UnitState units[256]
     """
     _fields_ = [
@@ -77,8 +78,9 @@ class GameStateC(ctypes.Structure):
         ("unit_count",  ctypes.c_uint8),
         ("my_peer_id",  ctypes.c_uint8),
         ("tick",        ctypes.c_uint32),
-        ("both_ready",  ctypes.c_uint8),   # ← NOUVEAU
-        ("_pad",        ctypes.c_uint8 * 3),
+        ("both_ready",  ctypes.c_uint8),
+        ("python_ready", ctypes.c_uint8),
+        ("_pad",        ctypes.c_uint8 * 2),
         ("units",       UnitState * MAX_UNITS),
     ]
 
@@ -183,6 +185,19 @@ def is_ready() -> bool:
         return False
 
 
+def set_python_ready(is_ready: bool = True) -> bool:
+    """Annonce au processus C que le jeu Python local est prêt."""
+    if not _bridge:
+        return False
+    try:
+        c_state = _bridge.lire()
+        c_state.python_ready = 1 if is_ready else 0
+        _bridge.ecrire(c_state)
+        return True
+    except Exception:
+        return False
+
+
 def request_ownership(unit) -> bool:
     """Marque une unité pour demander sa propriété au prochain exchange_state."""
     if not _bridge:
@@ -270,7 +285,8 @@ def exchange_state(engine) -> None:
     c_state.my_peer_id = my_peer
     c_state.unit_count = len(units)
     # both_ready est piloté uniquement par le processus C.
-    # On conserve la valeur lue depuis la SHM.
+    # python_ready reflète la disponibilité du jeu Python local.
+    c_state.python_ready = 1
 
     for unit in units:
         uid = unit.unit_id
@@ -327,5 +343,11 @@ def exchange_state(engine) -> None:
 
 def shutdown() -> None:
     """Ferme la connexion SHM."""
+    global _bridge
     if _bridge:
+        try:
+            set_python_ready(False)
+        except Exception:
+            pass
         _bridge.fermer()
+        _bridge = None

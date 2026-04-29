@@ -52,6 +52,10 @@ void proto_send_hello(uint8_t my_peer_id)
 /* ── Traitement du handshake sur réception ──────────────────────────────────── */
 static void handle_hello(const NetMessage *msg, GameState *state)
 {
+    if (!state->python_ready) {
+        return;
+    }
+
     int bit = (1 << msg->sender_id);
     if (g_peers_said_hello & bit) {
         /* Déjà vu, mais on renvoie quand même READY au cas où il n'aurait pas reçu */
@@ -87,6 +91,10 @@ static void handle_hello(const NetMessage *msg, GameState *state)
 
 static void handle_ready(const NetMessage *msg, GameState *state)
 {
+    if (!state->python_ready) {
+        return;
+    }
+
     /*
      * MSG_READY = confirmation que l'autre a bien reçu notre HELLO.
      * Si pour une raison quelconque on n'avait pas encore enregistré

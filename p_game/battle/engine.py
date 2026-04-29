@@ -230,6 +230,8 @@ class Engine:
 
             # ── En mode réparti : attendre que les deux PC soient prêts ──────
             if self.is_distributed:
+                import network_bridge
+                network_bridge.set_python_ready(True)
                 if not self.wait_for_network_ready():
                     print("[engine] Abandon : adversaire absent.")
                     return

@@ -154,12 +154,30 @@ int main(int argc, char *argv[])
     local_state.both_ready  = 0;
     ipc_write_state(&local_state);
 
-    /* Envoie immédiatement un premier HELLO */
-    proto_send_hello(my_peer_id);
-
     long hello_timer = 0;   /* compteur en ms pour renvoyer HELLO si besoin */
+    int hello_sent = 0;
 
     while (g_running && !proto_handshake_done()) {
+        if (ipc_read_state(&local_state) < 0) {
+            fprintf(stderr, "[main] Erreur lecture SHM pendant handshake\n");
+            break;
+        }
+        local_state.my_peer_id = my_peer_id;
+        local_state.both_ready = 0;
+
+        if (!local_state.python_ready) {
+            if (ipc_write_state(&local_state) < 0) {
+                fprintf(stderr, "[main] Erreur ecriture SHM pendant attente Python\n");
+                break;
+            }
+            usleep(16000);
+            continue;
+        }
+
+        if (!hello_sent) {
+            proto_send_hello(my_peer_id);
+            hello_sent = 1;
+        }
 
         /* Re-envoyer MSG_HELLO toutes les 500 ms (UDP peu fiable) */
         hello_timer += 16;
@@ -179,7 +197,6 @@ int main(int argc, char *argv[])
         }
 
         /* Écrit l'état dans la SHM pour que Python voie both_ready */
-        local_state.my_peer_id = my_peer_id;
         ipc_write_state(&local_state);
 
         usleep(16000);   /* ~60 Hz */
