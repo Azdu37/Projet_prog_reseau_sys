@@ -1,29 +1,26 @@
-# IDE
+
 .idea/
 .vscode/
 
-# Python
+
 __pycache__/
 *.py[cod]
 *.pyd
 *.pyo
 
-# Virtual environments
 .venv/
 venv/
 env/
 
-# Generated reports
 game_report_*.html
 lanchester_report_*.html
 lanchester_plot_report.html
 tournament_report.html
 
-# C — fichiers générés par le Makefile
 c_network/*.o
 c_network/c_net
 c_network/test_ipc
-# C / C++
+
 *.o
 *.obj
 *.a
@@ -34,18 +31,18 @@ c_network/test_ipc
 *.out
 *.app
 
-# Build folders
+
 build/
 cmake-build-*/
 dist/
 bin/
 
-# Generated files
+
 *.log
 *.tmp
 *.swp
 
-# CMake
+
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake

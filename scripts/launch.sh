@@ -92,14 +92,14 @@ ROOT="$SCRIPT_DIR/.."
 echo "╔═════════════════════════════════════════════════════════════╗"
 echo "║          BATAILLE RÉSEAU — Python ↔ SHM ↔ C ↔ UDP           ║"
 echo "╠═════════════════════════════════════════════════════════════╣"
-echo "║   ÉQUIPE   : $COULEUR"                                      ║
-echo "║   IA       : $MON_IA"                                       ║
-echo "║   ADVERSAIRE: $REMOTE_IP"                                   ║
-echo "║    SCENARIO : $SCENARIO"                                    ║
+echo "║   ÉQUIPE   : $COULEUR                                       ║"
+echo "║   IA       : $MON_IA                                        ║"
+echo "║   ADVERSAIRE: $REMOTE_IP                                    ║"
+echo "║    SCENARIO : $SCENARIO                                     ║"
 if [ "${#PY_VIEW_ARGS[@]}" -gt 0 ]; then                            
-echo "║    AFFICHAGE: ${PY_VIEW_ARGS[*]}"                           ║
+echo "║    AFFICHAGE: ${PY_VIEW_ARGS[*]}                            ║"
 else
-echo "║    AFFICHAGE: graphique (pygame)"                           ║
+echo "║    AFFICHAGE: graphique (pygame)                            ║"
 fi
 echo "║                                                             ║"
 echo "║    L'autre joueur doit choisir l'Équipe $COULEUR_ADVERSE !  ║"

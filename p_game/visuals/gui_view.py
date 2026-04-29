@@ -89,6 +89,11 @@ class GUI_view:
 
         self.all_units : list[Unit] = None
 
+        # Detecteur de zombies
+        self.dead_unit_ids : set = set()       # IDs des unites qu'on a vues mourir
+        self.zombie_count : int = 0            # Nb de zombies detectes au total
+        self.zombie_font = pygame.font.SysFont("monospace", 16, bold=True)
+
     def move(self, dx : int, dy : int):
         """Permet de deplacer l'affichage de la map (appel apres detection de ZQSD)"""
         # dx > 0 -> vers la droite
@@ -283,8 +288,42 @@ class GUI_view:
             elif (projectile.shooter.type == "S"):
                 pygame.draw.line(self.screen, (50,50,50), (proj_x, proj_y), (proj_x+proj_dir_x*self.size_projectile_javelot*2.5, proj_y+proj_dir_y*self.size_projectile_javelot*2.5), round(self.size_projectile_javelot/4),)
 
-    def display_units(self, map : Map, fps):
+    def detect_zombies(self, all_units_raw):
+        """Detecte les unites mortes qui sont revenues a la vie (zombies)."""
+        for unit in all_units_raw:
+            uid = id(unit)  # identifiant Python unique de l'objet unite
+            if not unit.is_alive:
+                # L'unite est morte : on l'enregistre dans la liste des morts
+                self.dead_unit_ids.add(uid)
+            else:
+                # L'unite est vivante : est-elle dans la liste des morts ?
+                if uid in self.dead_unit_ids:
+                    # Elle etait morte et elle est de retour -> ZOMBIE !
+                    self.zombie_count += 1
+                    # On la retire de la liste pour ne pas la compter deux fois de suite
+                    self.dead_unit_ids.discard(uid)
+
+    def display_zombie_detector(self):
+        """Affiche le compteur de zombies en bas de l'ecran."""
+        bar_height = 28
+        bar_y = self.max_size[1] - bar_height
+        bar_color = (40, 10, 10)
+        pygame.draw.rect(self.screen, bar_color, (0, bar_y, self.max_size[0], bar_height))
+
+        if self.zombie_count == 0:
+            label = "  ZOMBIE DETECTOR : aucun zombie detecte"
+            color = (150, 220, 150)
+        else:
+            label = f"  ZOMBIE DETECTOR : {self.zombie_count} zombie(s) detecte(s) !"
+            color = (255, 80, 0)
+
+        text = self.zombie_font.render(label, True, color)
+        self.screen.blit(text, (0, bar_y + (bar_height - text.get_height()) // 2))
+
+    def display_units(self, map : Map, fps, all_units_raw):
         """ Affichage unités """
+        # Detection des zombies avant le filtrage
+        self.detect_zombies(all_units_raw)
         # Retirer les unités mortes de la liste d'affichage
         self.all_units = [u for u in self.all_units if u.is_alive]
         # On trie les unités pour qu'elle soit dans le bon ordre d'affichage isometrique
@@ -527,19 +566,22 @@ class GUI_view:
 
     def display(self, map: Map, battle_infos: dict):
         """ Return True si il faut continuer a afficher et False si il faut quitter le gui"""
-        self.all_units = [unit for unit in map.map.values() if unit is not None]
+        all_units_raw = [unit for unit in map.map.values() if unit is not None]
+        self.all_units = list(all_units_raw)
 
         self.screen.fill((0,0,0))
         
         self.display_background()
 
-        self.display_units(map, battle_infos["turn_fps"])
+        self.display_units(map, battle_infos["turn_fps"], all_units_raw)
 
         self.display_projectiles(map)
         
         self.display_mini_map(map)
         
         self.display_game_infos(battle_infos)
+
+        self.display_zombie_detector()
 
         pygame.display.flip()
 
