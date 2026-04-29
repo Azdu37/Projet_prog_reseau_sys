@@ -360,6 +360,17 @@ class Map:
             angle = atan2(target.position[1] - unit.position[1], target.position[0] - unit.position[0]) + 3.15
             unit.orientation = (round(angle * 8 / 6.28) + 3) % 8
             return False
+        if hasattr(target, 'is_local') and not target.is_local:
+            engine = getattr(self, "engine", None)
+            if engine is not None:
+                engine.queue_network_attack(unit, target)
+                unit.state = "attacking"
+                unit.target = target
+                angle = atan2(target.position[1] - unit.position[1], target.position[0] - unit.position[0]) + 3.15
+                unit.orientation = (round(angle * 8 / 6.28) + 3) % 8
+            else:
+                print("[DEMO-CHECK] Action annulee: moteur indisponible pour demander la propriete")
+            return None
         # commence l'attaque
         unit.state = "attacking"
         unit.target = target
@@ -379,6 +390,28 @@ class Map:
         # set cooldown
 
         return
+
+    def apply_verified_attack(self, unit, target):
+        """Applique une attaque apres obtention et verification de la propriete cible."""
+        if hasattr(unit, 'is_local') and not unit.is_local:
+            return None
+        if not unit.can_attack(target):
+            return None
+
+        unit.state = "attacking"
+        unit.target = target
+
+        angle = atan2(target.position[1] - unit.position[1], target.position[0] - unit.position[0]) + 3.15
+        unit.orientation = (round(angle * 8 / 6.28) + 3) % 8
+
+        unit.time_reset()
+        target.take_damage(unit)
+        if target.current_hp <= 0:
+            target.current_hp = 0
+            target.is_alive = False
+            target.state = "dead"
+            target.target = None
+        return None
 
     def fire_projectile(self, shooter, target):
         type = shooter.type
@@ -504,6 +537,11 @@ class Map:
 
             if dist_2 < (unit.size) ** 2:
                 # En mode réparti, seule une munition tirée par une unité locale applique les dégâts
+                if hasattr(unit, 'is_local') and not unit.is_local:
+                    engine = getattr(self, "engine", None)
+                    if engine is not None:
+                        engine.queue_network_attack(projectile.shooter, unit)
+                    return True
                 if not hasattr(projectile.shooter, 'is_local') or projectile.shooter.is_local:
                     unit.take_damage(projectile.shooter)
                 return True
