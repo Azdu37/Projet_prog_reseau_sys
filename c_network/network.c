@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <ifaddrs.h>
 
 /* ─────────────────────────────────────────────
  * État interne
@@ -24,6 +25,31 @@
 static int    g_sock = -1;              /* socket UDP                 */
 static Peer   g_peers[MAX_PEERS];      /* liste des pairs connus     */
 static int    g_peer_count = 0;
+
+static int is_local_ipv4(const struct in_addr *candidate)
+{
+    struct ifaddrs *ifaddr = NULL;
+    if (getifaddrs(&ifaddr) < 0) {
+        perror("[net] getifaddrs");
+        return 0;
+    }
+
+    int found = 0;
+    for (struct ifaddrs *ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET) {
+            continue;
+        }
+
+        struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
+        if (addr->sin_addr.s_addr == candidate->s_addr) {
+            found = 1;
+            break;
+        }
+    }
+
+    freeifaddrs(ifaddr);
+    return found;
+}
 
 /* ─────────────────────────────────────────────
  * net_init
@@ -94,6 +120,14 @@ int net_add_peer(const char *ip_str, uint16_t port, uint8_t peer_id)
 
     if (inet_pton(AF_INET, ip_str, &p->addr.sin_addr) <= 0) {
         fprintf(stderr, "[net] adresse IP invalide: %s\n", ip_str);
+        return -1;
+    }
+
+    if (is_local_ipv4(&p->addr.sin_addr)) {
+        fprintf(stderr,
+                "[net] adresse IP distante %s correspond a cette machine. "
+                "Verifiez l'IP du PC adverse.\n",
+                ip_str);
         return -1;
     }
 

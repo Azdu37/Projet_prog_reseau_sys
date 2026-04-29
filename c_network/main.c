@@ -101,6 +101,7 @@ int main(int argc, char *argv[])
     }
 
     int nb_pairs = argc - 2;
+    int added_peers = 0;
     for (int i = 2; i < argc; i++) {
         char   *arg        = argv[i];
         char   *colon      = strchr(arg, ':');
@@ -130,12 +131,23 @@ int main(int argc, char *argv[])
 
         if (net_add_peer(ip, peer_port, peer_id) < 0)
             fprintf(stderr, "[main] Impossible d'ajouter le pair %s\n", ip);
-        else
+        else {
+            added_peers++;
             printf("[main] Pair ajoute : %s:%d (ID=%d)\n", ip, peer_port, peer_id);
+        }
+    }
+
+    if (added_peers != nb_pairs) {
+        fprintf(stderr,
+                "[main] Configuration invalide: %d pair(s) attendu(s), %d ajoute(s).\n",
+                nb_pairs, added_peers);
+        net_close();
+        ipc_close();
+        return 1;
     }
 
     /* Informe le module protocol du nombre de pairs à attendre */
-    proto_set_expected_peers(nb_pairs);
+    proto_set_expected_peers(added_peers);
 
     signal(SIGINT, handle_sigint);
 
