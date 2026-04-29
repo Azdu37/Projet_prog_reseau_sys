@@ -183,6 +183,17 @@ def _set_unit_position(engine, unit, new_pos):
         unit.position = tuple(new_pos)
 
 
+def _ensure_unit_on_map(engine, unit):
+    if not unit.is_alive:
+        return
+    game_map = getattr(engine, "game_map", None)
+    if game_map is None:
+        return
+    if unit in game_map.map.values():
+        return
+    game_map.map[tuple(unit.position)] = unit
+
+
 def _slot_has_position(slot):
     return slot.x != 0.0 or slot.y != 0.0
 
@@ -214,6 +225,7 @@ def _activate_remote_unit(engine, unit, slot):
     if slot.alive == 0 or slot.hp == 0:
         return False
 
+    was_dead = not unit.is_alive or unit.current_hp <= 0 or unit.state == "dead"
     unit.v1_remote_seen = True
     unit.is_alive = True
     if unit.state == "dead":
@@ -222,6 +234,11 @@ def _activate_remote_unit(engine, unit, slot):
 
     if _slot_has_position(slot):
         _set_unit_position(engine, unit, (slot.x, slot.y))
+    else:
+        _ensure_unit_on_map(engine, unit)
+
+    if was_dead and hasattr(engine, "mark_unit_zombie"):
+        engine.mark_unit_zombie(unit, source="network_resurrected")
 
     _log_v1_once(
         ("placement", unit.unit_id),
@@ -251,6 +268,8 @@ def _mark_unit_dead(engine, unit):
         unit.target = None
         unit.direction = (0, 0)
     _remove_unit_from_map(engine, unit)
+    if hasattr(engine, "confirm_unit_dead"):
+        engine.confirm_unit_dead(unit, source="network")
 
 
 def exchange_state(engine) -> None:

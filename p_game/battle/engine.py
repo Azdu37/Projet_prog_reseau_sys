@@ -111,16 +111,18 @@ class Engine:
         self.time_turn = 0
         self.units = []
 
-        # ── Détecteur de zombies (moteur) ──
-        # Ensemble des unit_id des unités qu'on a vues mourir au moins une fois
+        # Detecteur de zombies (moteur)
+        # Ensemble des unit_id des unites qu'on a vues mourir au moins une fois
         self._dead_unit_ids: set = set()
         # Buffer de confirmation de mort : {unit_id: ticks_restants}
-        # Une mort n'est confirmée qu'après DEATH_CONFIRM_TICKS ticks (~0.1s)
+        # Une mort n'est confirmee qu'apres DEATH_CONFIRM_TICKS ticks (~0.1s)
         self._pending_dead: dict = {}
-        self.DEATH_CONFIRM_TICKS = 6  # 6 ticks à 60 TPS ≈ 0.1 seconde
-        # Nombre total de zombies détectés depuis le début de la partie
+        self.DEATH_CONFIRM_TICKS = 6  # 6 ticks a 60 TPS ~= 0.1 seconde
+        self._dead_log_ids: set = set()
+        self._missing_unit_id_warned: set = set()
+        # Nombre total de zombies detectes depuis le debut de la partie
         self.zombie_count: int = 0
-        # Liste des événements zombie: [(turn, unit_id, team), ...]
+        # Liste des evenements zombie: dict(turn, unit_id, team, hp, position, source)
         self.zombie_events: list = []
 
     def initialize_units(self):
@@ -333,47 +335,96 @@ class Engine:
 
 
         
+    def _unit_tracking_id(self, unit):
+        if hasattr(unit, 'unit_id'):
+            return unit.unit_id
+        marker = id(unit)
+        if marker not in self._missing_unit_id_warned:
+            self._missing_unit_id_warned.add(marker)
+            print(
+                "[ZOMBIE WARNING] Unite sans unit_id ignoree par le detecteur "
+                f"zombie: {unit!r}"
+            )
+        return None
+
+    def _confirm_dead_unit(self, uid, unit=None, source="engine"):
+        if uid is None or uid in self._dead_unit_ids:
+            return
+        self._pending_dead.pop(uid, None)
+        self._dead_unit_ids.add(uid)
+        if uid not in self._dead_log_ids:
+            self._dead_log_ids.add(uid)
+            team = getattr(unit, 'team', '?')
+            print(
+                f"[DEAD TRACK] Tour {self.current_turn} | Unite #{uid} "
+                f"equipe {team} morte confirmee ({source})."
+            )
+
+    def confirm_unit_dead(self, unit, source="engine"):
+        uid = self._unit_tracking_id(unit)
+        self._confirm_dead_unit(uid, unit, source)
+
+    def mark_unit_zombie(self, unit, source="engine"):
+        uid = self._unit_tracking_id(unit)
+        if uid is None:
+            return False
+        was_known_dead = uid in self._dead_unit_ids or uid in self._pending_dead
+        if not was_known_dead and source == "engine":
+            return False
+        if not getattr(unit, 'is_zombie', False):
+            unit.is_zombie = True
+            self.zombie_count += 1
+            event = {
+                "turn": self.current_turn,
+                "unit_id": uid,
+                "team": getattr(unit, 'team', '?'),
+                "hp": int(getattr(unit, 'current_hp', 0) or 0),
+                "position": tuple(getattr(unit, 'position', (None, None))),
+                "source": source,
+            }
+            self.zombie_events.append(event)
+            print(
+                f"[ZOMBIE DETECTE] Tour {self.current_turn} | Unite #{uid} "
+                f"equipe {event['team']} revenue a la vie "
+                f"hp={event['hp']} pos={event['position']} source={source}."
+            )
+        self._dead_unit_ids.discard(uid)
+        self._pending_dead.pop(uid, None)
+        return True
+
     def detect_zombie_in_engine(self, unit):
         """
-        Appelé pour chaque unité vivante : vérifie si elle était préalablement
-        marquée comme morte (zombie réseau ou incohérence moteur).
-        Met unit.is_zombie = True et log l'événement si c'est le cas.
+        Appele pour chaque unite vivante : verifie si elle etait prealablement
+        marquee comme morte.
         """
-        uid = getattr(unit, 'unit_id', id(unit))
+        uid = self._unit_tracking_id(unit)
+        if uid is None:
+            return
         if uid in self._dead_unit_ids:
-            # Elle était morte et elle est de retour -> ZOMBIE !
-            if not getattr(unit, 'is_zombie', False):
-                unit.is_zombie = True
-                self.zombie_count += 1
-                event = (self.current_turn, uid, unit.team)
-                self.zombie_events.append(event)
-                print(
-                    f"[ZOMBIE DETECTE] Tour {self.current_turn} | "
-                    f"Unite #{uid} equipe {unit.team} est revenue a la vie !"
-                )
-            # On la retire des morts connus pour ne pas la recompter tant qu'elle reste en vie
-            self._dead_unit_ids.discard(uid)
+            self.mark_unit_zombie(unit, source="engine")
 
     def update_units(self, time_per_tick):
         for unit in self.units:
             unit.update(time_per_tick)
-            uid = getattr(unit, 'unit_id', id(unit))
+            uid = self._unit_tracking_id(unit)
+            if uid is None:
+                continue
             if not unit.is_alive:
-                # L'unité est morte : on l'ajoute au buffer de confirmation
+                # L'unite est morte : on l'ajoute au buffer de confirmation
                 # (pas directement dans _dead_unit_ids)
                 if uid not in self._dead_unit_ids and uid not in self._pending_dead:
                     self._pending_dead[uid] = self.DEATH_CONFIRM_TICKS
-                # Retirer les unités mortes de la carte
+                # Retirer les unites mortes de la carte
                 self.game_map.remove_unit_instance(unit)
             else:
-                # L'unité est vivante : si elle était dans le buffer, on l'en retire
-                # (elle a survécu avant confirmation → pas un vrai mort)
+                # L'unite est vivante : si elle etait dans le buffer, on l'en retire
+                # (elle a survecu avant confirmation, donc pas un vrai mort)
                 if uid in self._pending_dead:
                     del self._pending_dead[uid]
-                # Vérification zombie : unité vivante qui était dans la liste des morts confirmés
+                # Verification zombie : unite vivante qui etait dans la liste des morts confirmes
                 self.detect_zombie_in_engine(unit)
 
-        # Décrémenter les timers du buffer et confirmer les morts à expiration
+        # Decrementer les timers du buffer et confirmer les morts a expiration
         expired = []
         for uid, ticks_left in self._pending_dead.items():
             if ticks_left <= 1:
@@ -381,8 +432,8 @@ class Engine:
             else:
                 self._pending_dead[uid] = ticks_left - 1
         for uid in expired:
-            del self._pending_dead[uid]
-            self._dead_unit_ids.add(uid)
+            unit = self.find_unit(uid)
+            self._confirm_dead_unit(uid, unit, source="engine")
 
     def update_projectiles(self):
             self.game_map.update_projectiles()
@@ -513,7 +564,10 @@ class Engine:
 
     def update_view(self):
         """Met à jour l'affichage pour refléter l'état actuel"""
-        a = self.view.display(self.game_map, self.get_game_info(), engine=self)
+        if self.view_type == 2:
+            a = self.view.display(self.game_map, self.get_game_info(), engine=self)
+        else:
+            a = self.view.display(self.game_map, self.get_game_info())
         if self.view_type == 2:
             if a["change_view"]:
                 self.change_view(a["change_view"])
