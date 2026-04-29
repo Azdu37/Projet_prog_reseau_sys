@@ -114,7 +114,6 @@ class Engine:
     def initialize_units(self):
         """charge la liste d'unite"""
         uid = 0
-        hidden_remote_units = []
         for (x, y), u in list(self.game_map.map.items()):
             u.unit_id = uid
             uid += 1
@@ -124,9 +123,10 @@ class Engine:
             if self.is_distributed:
                 u.is_local = (self.local_team is not None and u.team == self.local_team)
                 u.network_owner = None
+                # Chaque poste démarre avec une copie locale complète de la scène.
+                # Le premier paquet reçu peut ensuite remplacer brutalement cette
+                # copie locale, ce qui rend les incohérences V1 observables.
                 u.v1_remote_seen = u.is_local or self.local_team is None
-                if self.local_team is not None and not u.is_local:
-                    hidden_remote_units.append(u)
             else:
                 u.is_local = True
                 u.network_owner = u.team
@@ -135,13 +135,10 @@ class Engine:
             u.owner_id = 0 if u.team == 'R' else 1
             self.units.append(u)
 
-        for unit in hidden_remote_units:
-            self.game_map.remove_unit_instance(unit)
-
-        if hidden_remote_units:
+        if self.is_distributed and self.local_team is not None:
             print(
-                f"[V1] {len(hidden_remote_units)} unités distantes masquées au départ; "
-                "elles apparaîtront à la réception des états réseau."
+                "[V1] Copie locale complète chargée; les états réseau distants "
+                "peuvent la remplacer brutalement en best-effort."
             )
 
     def all_units(self):
