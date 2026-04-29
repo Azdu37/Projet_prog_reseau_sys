@@ -303,79 +303,21 @@ class GUI_view:
             self._zombie_count_seen = engine_count
 
     def _draw_zombie_marker(self, screen, proj_x, proj_y, unit):
-        """
-        Dessine un marqueur visuel vert fluo sur l'unité zombie :
-          - Halo vert semi-transparent
-          - Croix verte
-          - Texte '☠' au-dessus
-        """
-        # Halo vert fluo (cercle)
+        """Dessine un cercle vert autour de l'unité zombie."""
         halo_r = max(18, int(unit.size * self.tile_h * 2.2))
-        halo_surf = pygame.Surface((halo_r * 2, halo_r * 2), pygame.SRCALPHA)
-        pygame.draw.circle(halo_surf, (50, 255, 50, 90), (halo_r, halo_r), halo_r)
-        pygame.draw.circle(halo_surf, (50, 255, 50, 200), (halo_r, halo_r), halo_r, 3)
-        screen.blit(halo_surf, (int(proj_x) - halo_r, int(proj_y) - halo_r))
-
-        # Croix verte
-        arm = halo_r - 4
-        pygame.draw.line(screen, (0, 255, 0), (int(proj_x) - arm, int(proj_y)), (int(proj_x) + arm, int(proj_y)), 3)
-        pygame.draw.line(screen, (0, 255, 0), (int(proj_x), int(proj_y) - arm), (int(proj_x), int(proj_y) + arm), 3)
-
-        # Texte ZOMBIE au-dessus
-        lbl = self.zombie_font.render("☠ ZOMBIE", True, (0, 255, 80))
-        screen.blit(lbl, (int(proj_x) - lbl.get_width() // 2, int(proj_y) - halo_r - lbl.get_height() - 2))
+        pygame.draw.circle(screen, (0, 255, 0), (int(proj_x), int(proj_y)), halo_r, 3)
 
     def display_zombie_detector(self, engine, fps):
-        """Affiche la barre d'alerte zombie en bas de l'écran."""
-        import time as _time
+        """Affiche le nombre de zombies en bas de l'écran."""
+        zombie_count = getattr(engine, 'zombie_count', 0) if engine else 0
 
-        # Mise à jour du timer de clignotement
-        self.detect_zombies(engine)
-        zombie_count = getattr(engine, 'zombie_count', 0)
-        zombie_events = getattr(engine, 'zombie_events', [])
-
-        if self._zombie_blink_timer > 0 and fps > 0:
-            self._zombie_blink_timer -= 1.0 / fps
-            # Clignotement 4 Hz
-            phase = int(self._zombie_blink_timer * 4) % 2
-            self._zombie_blink_on = (phase == 0)
-        else:
-            self._zombie_blink_on = True
-
-        bar_height = 32
+        bar_height = 24
         bar_y = self.max_size[1] - bar_height
+        pygame.draw.rect(self.screen, (0, 0, 0), (0, bar_y, self.max_size[0], bar_height))
 
-        # Fond
-        if zombie_count > 0 and self._zombie_blink_on:
-            bar_color = (80, 15, 5)
-        elif zombie_count > 0:
-            bar_color = (50, 8, 3)
-        else:
-            bar_color = (20, 35, 20)
-        pygame.draw.rect(self.screen, bar_color, (0, bar_y, self.max_size[0], bar_height))
-
-        # Texte principal
-        if zombie_count == 0:
-            label = "  ☠ ZOMBIE DETECTOR : aucun zombie détecté"
-            color = (100, 210, 100)
-        else:
-            label = f"  ☠ ZOMBIE DETECTOR : {zombie_count} zombie(s) détecté(s) !"
-            color = (255, 100, 20) if self._zombie_blink_on else (200, 60, 10)
-
-        text = self.zombie_font.render(label, True, color)
+        label = f"  nombre zombies : {zombie_count}"
+        text = self.zombie_font.render(label, True, (255, 255, 255))
         self.screen.blit(text, (0, bar_y + (bar_height - text.get_height()) // 2))
-
-        # Historique des derniers événements (5 max) affiché à droite
-        recent = zombie_events[-5:]
-        if recent:
-            parts = [f"T{ev[0]} #{ ev[1]}({ev[2]})" for ev in recent]
-            hist_text = "  |  ".join(parts)
-            hist_surf = self.zombie_font.render(hist_text, True, (255, 200, 80))
-            x_hist = self.max_size[0] - hist_surf.get_width() - 8
-            self.screen.blit(hist_surf, (x_hist, bar_y + (bar_height - hist_surf.get_height()) // 2))
-
-        # Ligne séparatrice
-        pygame.draw.line(self.screen, (80, 80, 80), (0, bar_y), (self.max_size[0], bar_y), 1)
 
     def display_units(self, map : Map, fps, all_units_raw, engine=None):
         """ Affichage unités """
