@@ -44,7 +44,10 @@ int main(int argc, char *argv[])
 
         /* Envoi des unites dirty */
         for (int i = 0; i < state.unit_count; i++) {
-            if (state.units[i].dirty) {
+            if (state.units[i].pending_request_peer == my_id) {
+                net_broadcast_request(state.units[i].id, my_id);
+                state.units[i].pending_request_peer = NO_PEER_ID;
+            } else if (state.units[i].dirty) {
                 net_broadcast(&state.units[i], my_id);
                 state.units[i].dirty = 0;
             }

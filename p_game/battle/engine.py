@@ -13,6 +13,8 @@ from statistics import mean
 
 from ia.registry import AI_REGISTRY
 
+NO_PEER_ID = 255
+
 def fix_string(string):
     """Transforme une chaîne de caractères en une version "fixe" (minuscules, sans espaces ou caractères spéciaux)"""
     str_void = ""
@@ -110,6 +112,8 @@ class Engine:
         self.turn_fps = 0
         self.time_turn = 0
         self.units = []
+        self.pending_network_actions = {}
+        self.network_trace = []
 
     def initialize_units(self):
         """charge la liste d'unite"""
@@ -122,24 +126,18 @@ class Engine:
             # qui pilote l'unité pour savoir ce que ce processus a le droit de jouer.
             if self.is_distributed:
                 u.is_local = (self.local_team is not None and u.team == self.local_team)
-                u.network_owner = None
-                # Chaque poste démarre avec une copie locale complète de la scène.
-                # Le premier paquet reçu peut ensuite remplacer brutalement cette
-                # copie locale, ce qui rend les incohérences V1 observables.
-                u.v1_remote_seen = u.is_local or self.local_team is None
+                u.network_owner = 0 if u.team == 'R' else 1
             else:
                 u.is_local = True
                 u.network_owner = u.team
-                u.v1_remote_seen = True
             # 0=R, 1=B
             u.owner_id = 0 if u.team == 'R' else 1
+            u.lock_owner_peer = NO_PEER_ID
+            u.pending_request_peer = NO_PEER_ID
+            u.network_version = 1
+            u.network_force_dirty = True
+            u.network_request_out = False
             self.units.append(u)
-
-        if self.is_distributed and self.local_team is not None:
-            print(
-                "[V1] Copie locale complète chargée; les états réseau distants "
-                "peuvent la remplacer brutalement en best-effort."
-            )
 
     def all_units(self):
         return self.units
@@ -155,6 +153,7 @@ class Engine:
 
         print(f"Loading scenario: {self.scenario_name}")
         self.game_map = Map()
+        self.game_map.engine = self
         Map.load(self.game_map, self.scenario_name)
 
 
@@ -393,28 +392,22 @@ class Engine:
 
     def process_turn(self):
         """Traite un tour de jeu (déplacements, combats, etc.)"""
-        # 0. Synchronisation entrante (mises à jour distantes via thread network_bridge)
         red_alive = 0
         blue_alive = 0
+        my_peer = self.get_local_peer_id()
         
         for unit in self.units:
             if not unit.is_alive:
                 continue
-            
-            # Stockage de l'état précédent pour détection de changement
-            
+
             if unit.team == 'R':
                 red_alive += 1
-                if not self.is_distributed or self.local_team == 'R':
+                if (not self.is_distributed or self.local_team == 'R') and not self.is_temporarily_locked_by_remote(unit, my_peer):
                     self.ia1.play_turn(unit, self.current_turn)
             elif unit.team == 'B':
                 blue_alive += 1
-                if not self.is_distributed or self.local_team == 'B':
+                if (not self.is_distributed or self.local_team == 'B') and not self.is_temporarily_locked_by_remote(unit, my_peer):
                     self.ia2.play_turn(unit, self.current_turn)
-            
-            # Détection de changement d'état (mouvement ou combat)
-
-        # Objective 2 : Immediate update broadcast on local change
 
         # Enregistre l'historique pour Lanchester (tous les 10 tours pour ne pas trop alourdir)
         if "lanchester" in self.scenario_name.lower() and self.current_turn % 10 == 0:
@@ -430,12 +423,103 @@ class Engine:
         network_bridge.exchange_state(self)
 
     def request_network_ownership(self, unit):
-        """V1 stricte: aucun transfert de propriété réseau."""
+        if not self.is_distributed:
+            return True
+        my_peer = self.get_local_peer_id()
+        if my_peer is None:
+            return False
+        if unit.owner_id == my_peer or getattr(unit, "lock_owner_peer", NO_PEER_ID) == my_peer:
+            return True
+        unit.network_request_out = True
         return False
 
     def cede_network_ownership(self, unit, new_owner_team=None):
-        """V1 stricte: aucune cession de propriété réseau."""
+        if not self.is_distributed:
+            return True
+        import network_bridge
+        requester_peer = new_owner_team if new_owner_team is not None else getattr(unit, "pending_request_peer", NO_PEER_ID)
+        if requester_peer == NO_PEER_ID:
+            return False
+        network_bridge.grant_temporary_ownership(unit, requester_peer)
+        unit.network_force_dirty = True
+        return True
+
+    def get_local_peer_id(self):
+        if not self.is_distributed or self.local_team is None:
+            return None
+        return 0 if self.local_team == 'R' else 1
+
+    def is_temporarily_locked_by_remote(self, unit, my_peer=None):
+        if my_peer is None:
+            my_peer = self.get_local_peer_id()
+        lock_owner = getattr(unit, "lock_owner_peer", NO_PEER_ID)
+        return my_peer is not None and lock_owner not in (NO_PEER_ID, my_peer)
+
+    def queue_network_action(self, actor, target, action_type, payload=None):
+        my_peer = self.get_local_peer_id()
+        if my_peer is None:
+            return False
+        if target.unit_id not in self.pending_network_actions:
+            self.pending_network_actions[target.unit_id] = {
+                "actor_id": actor.unit_id,
+                "target_id": target.unit_id,
+                "action_type": action_type,
+                "payload": payload or {},
+                "requester_peer": my_peer,
+            }
+            target.network_request_out = True
+            self.network_trace.append((self.current_turn, "request", target.unit_id, my_peer))
+            print(f"[V2] Peer {my_peer} demande la propriete temporaire de l'unite #{target.unit_id}.")
         return False
+
+    def process_pending_network_actions(self):
+        if not self.pending_network_actions:
+            return
+
+        import network_bridge
+
+        my_peer = self.get_local_peer_id()
+        done = []
+        for target_id, action in list(self.pending_network_actions.items()):
+            actor = self.find_unit(action["actor_id"])
+            target = self.find_unit(action["target_id"])
+            projectile = action["payload"].get("projectile") if action["payload"] else None
+            if actor is None or target is None or not actor.is_alive or not target.is_alive:
+                if projectile is not None:
+                    projectile.consumed = True
+                done.append(target_id)
+                continue
+            if getattr(target, "lock_owner_peer", NO_PEER_ID) != my_peer:
+                continue
+
+            if action["action_type"] == "attack":
+                if not actor.can_attack(target):
+                    print(f"[V2] Action refusee apres grant: l'unite #{actor.unit_id} ne peut plus attaquer #{target.unit_id}.")
+                    network_bridge.commit_unit_state(target)
+                    target.network_force_dirty = True
+                    done.append(target_id)
+                    continue
+                actor.state = "attacking"
+                actor.target = target
+                actor.time_reset()
+                target.take_damage(actor)
+                network_bridge.commit_unit_state(target)
+                target.network_force_dirty = True
+                self.network_trace.append((self.current_turn, "commit", target.unit_id, int(target.current_hp)))
+                print(f"[V2] Commit coherent: unite #{target.unit_id} mise a jour a hp={int(target.current_hp)}.")
+                done.append(target_id)
+            elif action["action_type"] == "projectile_hit":
+                if projectile is not None:
+                    projectile.consumed = True
+                target.take_damage(actor)
+                network_bridge.commit_unit_state(target)
+                target.network_force_dirty = True
+                self.network_trace.append((self.current_turn, "commit", target.unit_id, int(target.current_hp)))
+                print(f"[V2] Commit coherent projectile: unite #{target.unit_id} mise a jour a hp={int(target.current_hp)}.")
+                done.append(target_id)
+
+        for target_id in done:
+            self.pending_network_actions.pop(target_id, None)
 
     def change_view(self, view_type):
         """Change la vue du jeu (terminal ou GUI)"""

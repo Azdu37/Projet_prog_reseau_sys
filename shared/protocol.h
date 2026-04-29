@@ -11,6 +11,7 @@
 #define SEM_WRITE_NAME   "/battle_sem_w"
 #define SEM_READ_NAME    "/battle_sem_r"
 #define NET_PORT         9000
+#define NO_PEER_ID       255u
 
 typedef struct {
     uint16_t id;
@@ -18,9 +19,12 @@ typedef struct {
     uint8_t  owner_peer;
     uint8_t  alive;
     uint8_t  dirty;
+    uint8_t  lock_owner_peer;
+    uint8_t  pending_request_peer;
     uint8_t  _pad[2];
     float    x, y;
     uint16_t hp, hp_max;
+    uint32_t version;
 } UnitState;
 
 typedef struct {
@@ -35,6 +39,7 @@ typedef struct {
 
 typedef enum {
     MSG_STATE_UPDATE = 1,
+    MSG_OWNERSHIP_REQUEST = 2,
 } MsgType;
 
 typedef struct {

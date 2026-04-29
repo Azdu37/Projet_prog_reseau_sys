@@ -14,6 +14,7 @@ class Map:
         self.q = q
         self.map = defaultdict(lambda: None, {})
         self.projectiles = []
+        self.engine = None
 
     def distance(self, pos1, pos2):
         """Calcule la distance entre deux positions"""
@@ -360,6 +361,10 @@ class Map:
         # En mode réparti, seules les unités locales déclenchent réellement les attaques
         if hasattr(unit, 'is_local') and not unit.is_local:
             return None
+        engine = getattr(self, "engine", None)
+        if engine is not None and getattr(engine, "is_distributed", False) and target.owner_id != engine.get_local_peer_id():
+            if not engine.request_network_ownership(target):
+                return engine.queue_network_action(unit, target, "attack")
         if not unit.can_attack(target):
             return None  # Ne peut pas attaquer
         if unit.time_before_next_attack > 0:
@@ -477,6 +482,11 @@ class Map:
         projectiles_to_remove = []
 
         for projectile in self.projectiles:
+            if getattr(projectile, "consumed", False):
+                projectiles_to_remove.append(projectile)
+                continue
+            if getattr(projectile, "pending_hit", None) is not None:
+                continue
 
             # Calcul de déplacement
             if self.hit(projectile) or projectile.travel_dist >= projectile.range:
@@ -512,6 +522,12 @@ class Map:
             if dist_2 < (unit.size) ** 2:
                 # En mode réparti, seule une munition tirée par une unité locale applique les dégâts
                 if not hasattr(projectile.shooter, 'is_local') or projectile.shooter.is_local:
+                    engine = getattr(self, "engine", None)
+                    if engine is not None and getattr(engine, "is_distributed", False) and unit.owner_id != engine.get_local_peer_id():
+                        if not engine.request_network_ownership(unit):
+                            projectile.pending_hit = unit
+                            engine.queue_network_action(projectile.shooter, unit, "projectile_hit", {"projectile": projectile})
+                            return False
                     unit.take_damage(projectile.shooter)
                 return True
 

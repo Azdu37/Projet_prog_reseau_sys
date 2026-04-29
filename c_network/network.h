@@ -15,6 +15,7 @@ void net_close(void);
 int  net_add_peer(const char *ip, uint16_t port, uint8_t peer_id);
 int  net_send(const UnitState *unit, uint8_t peer_id, uint8_t sender_id);
 int  net_broadcast(const UnitState *unit, uint8_t sender_id);
+int  net_broadcast_request(uint16_t unit_id, uint8_t sender_id);
 int  net_recv(NetMessage *msg_out);
 
 #endif

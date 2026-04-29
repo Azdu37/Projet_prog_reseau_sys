@@ -7,6 +7,8 @@ class Projectile:
         self.range= None
 
         self.travel_dist=0
+        self.pending_hit = None
+        self.consumed = False
 
     def arrow(self, shooter, destination, distance):
         """Crossbow Man Projectile"""

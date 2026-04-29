@@ -72,11 +72,39 @@ int net_send(const UnitState *unit, uint8_t peer_id, uint8_t sender_id)
     return (s < 0) ? -1 : 0;
 }
 
+static int net_send_request(uint16_t unit_id, uint8_t peer_id, uint8_t sender_id)
+{
+    if (g_sock < 0) return -1;
+
+    Peer *dest = NULL;
+    for (int i = 0; i < g_peer_count; i++)
+        if (g_peers[i].peer_id == peer_id) { dest = &g_peers[i]; break; }
+    if (!dest) return -1;
+
+    NetMessage msg = {0};
+    msg.magic = PROTOCOL_MAGIC;
+    msg.type = MSG_OWNERSHIP_REQUEST;
+    msg.sender_id = sender_id;
+    msg.unit_id = unit_id;
+
+    ssize_t s = sendto(g_sock, &msg, sizeof(msg), 0,
+                       (struct sockaddr *)&dest->addr, sizeof(dest->addr));
+    return (s < 0) ? -1 : 0;
+}
+
 int net_broadcast(const UnitState *unit, uint8_t sender_id)
 {
     int ok = 0;
     for (int i = 0; i < g_peer_count; i++)
         if (net_send(unit, g_peers[i].peer_id, sender_id) == 0) ok++;
+    return ok;
+}
+
+int net_broadcast_request(uint16_t unit_id, uint8_t sender_id)
+{
+    int ok = 0;
+    for (int i = 0; i < g_peer_count; i++)
+        if (net_send_request(unit_id, g_peers[i].peer_id, sender_id) == 0) ok++;
     return ok;
 }
 
