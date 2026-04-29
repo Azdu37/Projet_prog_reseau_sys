@@ -186,6 +186,29 @@ class Engine:
         pass
     
     
+    def wait_for_network_ready(self, timeout: float = 120.0) -> bool:
+        """
+        En mode réparti, attend que le processus C ait terminé son handshake
+        avec tous les pairs distants (both_ready == 1 dans la SHM).
+
+        Retourne True si le jeu peut commencer, False si timeout atteint.
+        """
+        import network_bridge
+        deadline = time.time() + timeout
+        dots = 0
+        print("[engine] En attente de la connexion de l'adversaire...", flush=True)
+        while time.time() < deadline:
+            if network_bridge.is_ready():
+                print("\n[engine] ✓ Tous les pairs connectés — la bataille commence !")
+                return True
+            time.sleep(0.25)
+            dots += 1
+            if dots % 8 == 0:
+                elapsed = int(time.time() - (deadline - timeout))
+                print(f"[engine]   ... toujours en attente ({elapsed}s)", flush=True)
+        print(f"\n[engine] ✗ Timeout ({timeout}s) : l'adversaire ne s'est pas connecté.")
+        return False
+
     def start(self):
         """Démarre la simulation de bataille"""
         print("=== Starting Battle ===")
@@ -204,6 +227,12 @@ class Engine:
             if self.view_type > 0:
                 self.initialize_view()
             self.initialize_units()
+
+            # ── En mode réparti : attendre que les deux PC soient prêts ──────
+            if self.is_distributed:
+                if not self.wait_for_network_ready():
+                    print("[engine] Abandon : adversaire absent.")
+                    return
 
             self.is_running = True
             self.star_execution_time = time.time()
