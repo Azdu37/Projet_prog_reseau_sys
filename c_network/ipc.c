@@ -1,3 +1,6 @@
+// Ce fichier gère la mémoire partagée et les sémaphores pour la communication inter-processus (IPC).
+// Il permet de lire et d'écrire l'état du jeu pour le partager entre les différents composants.
+
 #include "ipc.h"
 #include <stdio.h>
 #include <string.h>

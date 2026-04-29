@@ -1,3 +1,6 @@
+// Ce fichier gère la communication réseau via des sockets UDP.
+// Il s'occupe de l'initialisation du réseau, de l'ajout de pairs, ainsi que de l'envoi et de la réception des messages.
+
 #include "network.h"
 #include <stdio.h>
 #include <string.h>

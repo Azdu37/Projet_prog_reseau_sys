@@ -1,7 +1,5 @@
-/*
- * test_ipc — Test standalone de la couche IPC
- * Usage : ./test_ipc [ecrire|lire] [peer_id]
- */
+// Ce fichier est un programme de test pour vérifier le bon fonctionnement de la communication inter-processus (IPC).
+// Il permet d'écrire ou de lire des données factices dans la mémoire partagée.
 
 #include "ipc.h"
 #include <stdio.h>

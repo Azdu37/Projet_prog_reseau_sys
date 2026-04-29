@@ -1,3 +1,6 @@
+// Ce fichier contient les définitions et les déclarations pour la gestion du réseau.
+// Il définit la structure des pairs et déclare les fonctions pour la communication UDP.
+
 #ifndef NETWORK_H
 #define NETWORK_H
 

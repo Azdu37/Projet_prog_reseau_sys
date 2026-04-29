@@ -1,3 +1,6 @@
+// Ce fichier définit les fonctions et les structures nécessaires pour la communication inter-processus (IPC).
+// Il déclare les fonctions d'initialisation, de fermeture, de lecture et d'écriture de l'état du jeu.
+
 #ifndef IPC_H
 #define IPC_H
 
