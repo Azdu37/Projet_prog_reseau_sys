@@ -112,7 +112,7 @@ class Unit:
     def die(self):
         self.current_hp = 0
         self.is_alive = False
-        self.is_zombie = False  # On remet a False : si elle revit, l'engine la marquera zombie
+        # is_zombie n'est PAS remis a False : un zombie reste marqué définitivement
         self.state = "dead"
         self.target = None
         self.direction = (0, 0)

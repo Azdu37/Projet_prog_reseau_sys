@@ -114,6 +114,10 @@ class Engine:
         # ── Détecteur de zombies (moteur) ──
         # Ensemble des unit_id des unités qu'on a vues mourir au moins une fois
         self._dead_unit_ids: set = set()
+        # Buffer de confirmation de mort : {unit_id: ticks_restants}
+        # Une mort n'est confirmée qu'après DEATH_CONFIRM_TICKS ticks (~0.1s)
+        self._pending_dead: dict = {}
+        self.DEATH_CONFIRM_TICKS = 6  # 6 ticks à 60 TPS ≈ 0.1 seconde
         # Nombre total de zombies détectés depuis le début de la partie
         self.zombie_count: int = 0
         # Liste des événements zombie: [(turn, unit_id, team), ...]
@@ -353,15 +357,32 @@ class Engine:
     def update_units(self, time_per_tick):
         for unit in self.units:
             unit.update(time_per_tick)
+            uid = getattr(unit, 'unit_id', id(unit))
             if not unit.is_alive:
-                # Enregistre la mort dans le set du détecteur
-                uid = getattr(unit, 'unit_id', id(unit))
-                self._dead_unit_ids.add(uid)
+                # L'unité est morte : on l'ajoute au buffer de confirmation
+                # (pas directement dans _dead_unit_ids)
+                if uid not in self._dead_unit_ids and uid not in self._pending_dead:
+                    self._pending_dead[uid] = self.DEATH_CONFIRM_TICKS
                 # Retirer les unités mortes de la carte
                 self.game_map.remove_unit_instance(unit)
             else:
-                # Vérification zombie : unité vivante qui était dans la liste des morts
+                # L'unité est vivante : si elle était dans le buffer, on l'en retire
+                # (elle a survécu avant confirmation → pas un vrai mort)
+                if uid in self._pending_dead:
+                    del self._pending_dead[uid]
+                # Vérification zombie : unité vivante qui était dans la liste des morts confirmés
                 self.detect_zombie_in_engine(unit)
+
+        # Décrémenter les timers du buffer et confirmer les morts à expiration
+        expired = []
+        for uid, ticks_left in self._pending_dead.items():
+            if ticks_left <= 1:
+                expired.append(uid)
+            else:
+                self._pending_dead[uid] = ticks_left - 1
+        for uid in expired:
+            del self._pending_dead[uid]
+            self._dead_unit_ids.add(uid)
 
     def update_projectiles(self):
             self.game_map.update_projectiles()
