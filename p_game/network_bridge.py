@@ -150,6 +150,7 @@ _bridge = None
 _warned_unit_cap = False
 _v1_logged_events = set()
 _pending_remote_dirty = {}
+_remote_slot_snapshots = {}
 _V1_DIRTY_REPEAT_TICKS = 8
 
 def init(player_id: int) -> bool:
@@ -184,6 +185,10 @@ def _set_unit_position(engine, unit, new_pos):
 
 def _slot_has_position(slot):
     return slot.x != 0.0 or slot.y != 0.0
+
+
+def _slot_snapshot(slot):
+    return (int(slot.alive), int(slot.hp), int(slot.hp_max), float(slot.x), float(slot.y))
 
 
 def _log_v1_once(key, message):
@@ -290,36 +295,46 @@ def exchange_state(engine) -> None:
         owner = unit.owner_id  # 0=R, 1=B
         if owner == my_peer:
             # ── NOTRE unité ──
-            # Accepter uniquement les baisses de HP (dégâts infligés par l'adversaire)
-            # slot.hp > 0 évite de lire un slot non initialisé
-            if slot.hp > 0 and slot.hp < unit.current_hp:
+            # Accepter les baisses de HP reçues en best-effort, y compris un
+            # dégât fatal. Une V1 ne garantit pas que l'autre PC verra cette mort
+            # au même moment, mais elle ne rend pas l'unité locale immortelle.
+            if slot.hp < unit.current_hp:
                 unit.current_hp = slot.hp
                 unit.get_hit = 0.2
                 if unit.current_hp <= 0:
+                    _log_v1_once(
+                        ("local-fatal-hit", uid),
+                        f"[V1] Unite locale #{uid} tuee par une mise a jour distante "
+                        "recue en best-effort."
+                    )
                     _mark_unit_dead(engine, unit)
-            elif slot.hp == 0 and slot.alive == 0 and unit.is_alive:
-                _log_v1_once(
-                    ("local-zombie", uid),
-                    f"[V1 incoherence] Unite locale #{uid} annoncee morte par le reseau, "
-                    "mais encore vivante ici: zombie observable avant V2."
-                )
-            # V1 volontairement imparfaite : un autre peer peut annoncer la mort
-            # de notre unité, mais sans transfert de propriété cette mort n'est
-            # pas considérée comme authoritative. La même unité peut donc rester
-            # vivante ici et morte ailleurs (cas "zombie" attendu en V1).
         else:
             # ── UNITÉ DISTANTE ──
+            remote_snapshot = _slot_snapshot(slot)
             if not getattr(unit, "v1_remote_seen", True):
-                _activate_remote_unit(engine, unit, slot)
+                if _activate_remote_unit(engine, unit, slot):
+                    _remote_slot_snapshots[uid] = remote_snapshot
+                else:
+                    unit.v1_remote_seen = True
+                    _remote_slot_snapshots[uid] = remote_snapshot
+                    _log_v1_once(
+                        ("remote-first-dead", uid),
+                        f"[V1] Premier etat recu pour l'unite distante #{uid}: "
+                        "deja morte chez son peer."
+                    )
+                    _mark_unit_dead(engine, unit)
                 continue
 
             if not unit.is_alive:
-                if slot.alive == 1 and slot.hp > 0:
+                previous_snapshot = _remote_slot_snapshots.get(uid)
+                if slot.alive == 1 and slot.hp > 0 and remote_snapshot != previous_snapshot:
                     _log_v1_once(
-                        ("remote-dead-here", uid),
+                        ("remote-resurrected", uid),
                         f"[V1 incoherence] Unite distante #{uid} morte localement, "
-                        "mais encore vivante chez son peer: divergence/zombie visible."
+                        "mais un nouvel etat distant vivant vient d'arriver: reapparition V1."
                     )
+                    _activate_remote_unit(engine, unit, slot)
+                _remote_slot_snapshots[uid] = remote_snapshot
                 continue
 
             # Mettre à jour la position (l'adversaire la contrôle)
@@ -327,27 +342,24 @@ def exchange_state(engine) -> None:
             if _slot_has_position(slot):
                 _set_unit_position(engine, unit, (slot.x, slot.y))
             
-            # Mettre à jour HP : accepter seulement les baisses (slot.hp > 0 pour éviter init à 0)
-            if slot.hp > 0 and slot.hp < unit.current_hp:
+            # Mettre à jour HP : accepter les baisses, y compris une mort.
+            if slot.hp < unit.current_hp:
                 unit.current_hp = slot.hp
                 unit.get_hit = 0.2
+                if unit.current_hp <= 0:
+                    _log_v1_once(
+                        ("remote-dead", uid),
+                        f"[V1] Unite distante #{uid} supprimee apres reception "
+                        "d'un etat mort best-effort."
+                    )
+                    _mark_unit_dead(engine, unit)
             elif slot.hp > unit.current_hp:
                 _log_v1_once(
                     ("remote-hp-diverged", uid),
                     f"[V1 incoherence] Unite distante #{uid}: hp local={unit.current_hp}, "
                     f"hp reseau={slot.hp}. Pas de reconciliation en V1."
                 )
-            elif slot.alive == 0 and slot.hp == 0:
-                _log_v1_once(
-                    ("remote-zombie", uid),
-                    f"[V1 incoherence] Unite distante #{uid} annoncee morte par le reseau, "
-                    "mais gardee vivante localement: zombie attendu en V1."
-                )
-            
-            # V1 volontairement imparfaite : on ne supprime pas une unité distante
-            # uniquement parce que le réseau annonce sa mort. Un paquet perdu,
-            # retardé ou écrasé peut laisser un peer avec une unité morte et
-            # l'autre avec une unité encore active.
+            _remote_slot_snapshots[uid] = remote_snapshot
 
     # ── PHASE 2 : Écrire l'état Python dans la SHM pour le C ──────────────
     c_state.magic = PROTOCOL_MAGIC
