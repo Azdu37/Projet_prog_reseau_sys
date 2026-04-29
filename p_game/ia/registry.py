@@ -23,7 +23,6 @@ AI_REGISTRY = {
     "tacticus20": Behaviour3,
     "basicia": Basic_IA,
     "strategus10" : Strategus10,
-
 }
 """"
     "coordia1": CoordIA1,
