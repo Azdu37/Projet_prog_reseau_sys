@@ -34,8 +34,8 @@ if [ "$#" -lt 3 ]; then
     echo "║   <COULEUR> : ROUGE ou BLEU                                    ║"
     echo "║   <MON_IA>  : basicia, majordaft, braindead, etc.              ║"
     echo "║                                                                ║"
-    echo "║ Exemple PC 1 : ./scripts/launch.sh 192.168.1.50 ROUGE basicia  ║"
-    echo "║ Exemple PC 2 : ./scripts/launch.sh 192.168.1.10 BLEU  basicia  ║"
+    echo "║ Exemple PC 1 : ./scripts/launch.sh 192.168.1.50 ROUGE          ║"
+    echo "║ Exemple PC 2 : ./scripts/launch.sh 192.168.1.10 BLEU           ║"
     echo "╚════════════════════════════════════════════════════════════════╝"
     exit 1
 fi
@@ -90,19 +90,19 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$SCRIPT_DIR/.."
 
 echo "╔═════════════════════════════════════════════════════════════╗"
-echo "║          BATAILLE RÉSEAU — Python ↔ SHM ↔ C ↔ UDP          ║"
+echo "║          BATAILLE RÉSEAU — Python ↔ SHM ↔ C ↔ UDP           ║"
 echo "╠═════════════════════════════════════════════════════════════╣"
-echo "║  🎯 ÉQUIPE   : $COULEUR"
-echo "║  🤖 IA       : $MON_IA"
-echo "║  📡 ADVERSAIRE: $REMOTE_IP"
-echo "║  🗺️  SCENARIO : $SCENARIO"
-if [ "${#PY_VIEW_ARGS[@]}" -gt 0 ]; then
-echo "║  🖥️  AFFICHAGE: ${PY_VIEW_ARGS[*]}"
+echo "║   ÉQUIPE   : $COULEUR"                                      ║
+echo "║   IA       : $MON_IA"                                       ║
+echo "║   ADVERSAIRE: $REMOTE_IP"                                   ║
+echo "║    SCENARIO : $SCENARIO"                                    ║
+if [ "${#PY_VIEW_ARGS[@]}" -gt 0 ]; then                            
+echo "║    AFFICHAGE: ${PY_VIEW_ARGS[*]}"                           ║
 else
-echo "║  🖥️  AFFICHAGE: graphique (pygame)"
+echo "║    AFFICHAGE: graphique (pygame)"                           ║
 fi
 echo "║                                                             ║"
-echo "║  ⚠️  L'autre joueur doit choisir l'Équipe $COULEUR_ADVERSE !  ║"
+echo "║    L'autre joueur doit choisir l'Équipe $COULEUR_ADVERSE !  ║"
 echo "╚═════════════════════════════════════════════════════════════╝"
 echo ""
 
