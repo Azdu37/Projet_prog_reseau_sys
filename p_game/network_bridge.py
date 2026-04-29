@@ -148,6 +148,9 @@ class POSIXBridge:
 # ── INSTANCE GLOBALE ──────────────────────────────────────────────────────────
 _bridge = None
 _warned_unit_cap = False
+_v1_logged_events = set()
+_pending_remote_dirty = {}
+_V1_DIRTY_REPEAT_TICKS = 8
 
 def init(player_id: int) -> bool:
     """Appelé par main.py pour s'accrocher à la mémoire IPC POSIX du ./c_net."""
@@ -167,14 +170,60 @@ def _set_unit_position(engine, unit, new_pos):
         _remove_unit_from_map(engine, unit)
         return
 
+    game_map = getattr(engine, "game_map", None)
     if tuple(unit.position) == tuple(new_pos):
+        if game_map is not None and unit not in game_map.map.values():
+            game_map.map[tuple(new_pos)] = unit
         return
 
-    game_map = getattr(engine, "game_map", None)
     if game_map is not None and hasattr(game_map, "maj_unit_posi"):
         game_map.maj_unit_posi(unit, tuple(new_pos))
     else:
         unit.position = tuple(new_pos)
+
+
+def _slot_has_position(slot):
+    return slot.x != 0.0 or slot.y != 0.0
+
+
+def _log_v1_once(key, message):
+    if key in _v1_logged_events:
+        return
+    _v1_logged_events.add(key)
+    print(message)
+
+
+def _write_unit_slot(slot, unit, owner, dirty):
+    slot.id = unit.unit_id
+    slot.team = owner
+    slot.owner_peer = owner
+    slot.hp_max = int(unit.max_hp)
+    slot.alive = 1 if unit.is_alive else 0
+    slot.x = float(unit.position[0])
+    slot.y = float(unit.position[1])
+    slot.hp = int(max(0, unit.current_hp))
+    slot.dirty = 1 if dirty else 0
+
+
+def _activate_remote_unit(engine, unit, slot):
+    if slot.alive == 0 or slot.hp == 0:
+        return False
+
+    unit.v1_remote_seen = True
+    unit.is_alive = True
+    if unit.state == "dead":
+        unit.state = "idle"
+    unit.current_hp = min(int(slot.hp), int(unit.max_hp))
+
+    if _slot_has_position(slot):
+        _set_unit_position(engine, unit, (slot.x, slot.y))
+
+    _log_v1_once(
+        ("placement", unit.unit_id),
+        f"[V1] Placement best-effort recu: unite distante #{unit.unit_id} "
+        f"team={unit.team} pos=({slot.x:.1f},{slot.y:.1f}) hp={slot.hp}/{slot.hp_max}."
+    )
+    return True
 
 
 def _remove_unit_from_map(engine, unit):
@@ -248,21 +297,52 @@ def exchange_state(engine) -> None:
                 unit.get_hit = 0.2
                 if unit.current_hp <= 0:
                     _mark_unit_dead(engine, unit)
+            elif slot.hp == 0 and slot.alive == 0 and unit.is_alive:
+                _log_v1_once(
+                    ("local-zombie", uid),
+                    f"[V1 incoherence] Unite locale #{uid} annoncee morte par le reseau, "
+                    "mais encore vivante ici: zombie observable avant V2."
+                )
             # V1 volontairement imparfaite : un autre peer peut annoncer la mort
             # de notre unité, mais sans transfert de propriété cette mort n'est
             # pas considérée comme authoritative. La même unité peut donc rester
             # vivante ici et morte ailleurs (cas "zombie" attendu en V1).
         else:
             # ── UNITÉ DISTANTE ──
+            if not getattr(unit, "v1_remote_seen", True):
+                _activate_remote_unit(engine, unit, slot)
+                continue
+
+            if not unit.is_alive:
+                if slot.alive == 1 and slot.hp > 0:
+                    _log_v1_once(
+                        ("remote-dead-here", uid),
+                        f"[V1 incoherence] Unite distante #{uid} morte localement, "
+                        "mais encore vivante chez son peer: divergence/zombie visible."
+                    )
+                continue
+
             # Mettre à jour la position (l'adversaire la contrôle)
             # Ne pas appliquer (0,0) qui signifie "pas encore reçu du réseau"
-            if slot.x != 0.0 or slot.y != 0.0:
+            if _slot_has_position(slot):
                 _set_unit_position(engine, unit, (slot.x, slot.y))
             
             # Mettre à jour HP : accepter seulement les baisses (slot.hp > 0 pour éviter init à 0)
             if slot.hp > 0 and slot.hp < unit.current_hp:
                 unit.current_hp = slot.hp
                 unit.get_hit = 0.2
+            elif slot.hp > unit.current_hp:
+                _log_v1_once(
+                    ("remote-hp-diverged", uid),
+                    f"[V1 incoherence] Unite distante #{uid}: hp local={unit.current_hp}, "
+                    f"hp reseau={slot.hp}. Pas de reconciliation en V1."
+                )
+            elif slot.alive == 0 and slot.hp == 0:
+                _log_v1_once(
+                    ("remote-zombie", uid),
+                    f"[V1 incoherence] Unite distante #{uid} annoncee morte par le reseau, "
+                    "mais gardee vivante localement: zombie attendu en V1."
+                )
             
             # V1 volontairement imparfaite : on ne supprime pas une unité distante
             # uniquement parce que le réseau annonce sa mort. Un paquet perdu,
@@ -284,31 +364,30 @@ def exchange_state(engine) -> None:
         slot = c_state.units[uid]
         owner = unit.owner_id  # 0=R, 1=B
 
-        # Toujours écrire TOUTES les données pour garder la SHM cohérente
-        slot.id = uid
-        slot.team = owner
-        slot.owner_peer = owner
-        slot.hp_max = int(unit.max_hp)
-        slot.alive = 1 if unit.is_alive else 0
-        slot.x = float(unit.position[0])
-        slot.y = float(unit.position[1])
-
         if owner == my_peer:
-            # ── NOTRE unité : toujours envoyer ──
-            slot.hp = int(unit.current_hp)
-            slot.dirty = 1
+            # V1: chaque peer pousse en continu ses propres troupes.
+            _write_unit_slot(slot, unit, owner, dirty=True)
         else:
-            # ── UNITÉ DISTANTE ──
-            # Lire le HP actuel du slot AVANT d'écraser
+            # V1: on ne possède jamais l'unité distante. On ne diffuse que les
+            # dégâts observés localement, répétés sur quelques ticks pour que le C
+            # ait le temps de les envoyer avant que le flag dirty retombe.
             current_shm_hp = slot.hp
             python_hp = int(unit.current_hp)
-            
-            # Toujours écrire le HP pour garder la SHM initialisée
-            slot.hp = python_hp
-            
-            # V1 best-effort: on signale seulement les baisses de HP observées localement.
-            if current_shm_hp > 0 and python_hp < current_shm_hp:
-                slot.dirty = 1
+
+            remote_seen = getattr(unit, "v1_remote_seen", True)
+            if remote_seen and current_shm_hp > 0 and python_hp < current_shm_hp:
+                _pending_remote_dirty[uid] = _V1_DIRTY_REPEAT_TICKS
+                unit.v1_last_remote_hp_sent = python_hp
+                _log_v1_once(
+                    ("remote-damage-sent", uid, python_hp),
+                    f"[V1] Degat local sur unite distante #{uid}: hp={python_hp}. "
+                    "Annonce best-effort envoyee sans propriete reseau."
+                )
+
+            pending = _pending_remote_dirty.get(uid, 0)
+            if pending > 0:
+                _write_unit_slot(slot, unit, owner, dirty=True)
+                _pending_remote_dirty[uid] = pending - 1
             else:
                 slot.dirty = 0
 

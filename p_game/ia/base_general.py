@@ -138,10 +138,10 @@ class General:
         return  ((ty - margin < uy < ty + margin) and (tx - margin < ux < tx + margin) )
     
         
-    def find_lowest_hp_enemy(self):
+    def find_lowest_hp_enemy(self, enemies=None):
         """Trouve l'unité ennemie avec le moins de points de vie"""
-        enemies = self.get_enemy_units()
-        return min(enemies, key=lambda e : e.hp, default=None)
+        enemies = self.get_enemy_units() if enemies is None else enemies
+        return min(enemies, key=lambda e: e.current_hp, default=None)
     
     def keep_dist(self,unit,dist):
         enemie = self.find_closest_enemy(unit,dist)

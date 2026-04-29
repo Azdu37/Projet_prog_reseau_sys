@@ -57,12 +57,12 @@ class Basic_IA(General):
         # crossbowman : Kite + attaque selon l’ordre C > K > P (HP le plus bas dans chaque type).
         # kite si il y a kninght et pikeman proche
         if self.keep_dist(unit, unit.range - 0.5):
-            target = self.find_best_target_in_range(unit, ['C', 'S', 'K' 'L', 'P'])
+            target = self.find_best_target_in_range(unit, ['C', 'S', 'K', 'L', 'P'])
         
             if target:
                 self.attack(unit, target)
         else:
-            target = self.find_best_target_in_range(unit, ['C', 'S', 'K' 'L', 'P'])
+            target = self.find_best_target_in_range(unit, ['C', 'S', 'K', 'L', 'P'])
             if target:
                 self.attack(unit, target)
             else:

@@ -14,9 +14,10 @@ static void afficher(const GameState *s)
            s->magic, s->my_peer_id, s->tick, s->unit_count);
     for (int i = 0; i < s->unit_count; i++) {
         const UnitState *u = &s->units[i];
-        printf("  [%d] team=%d peer=%d pos=(%.1f,%.1f) hp=%d/%d %s%s\n",
+        const char *origin = (u->owner_peer == s->my_peer_id) ? "" : " << RESEAU";
+        printf("  [%d] team=%d peer=%d pos=(%.1f,%.1f) hp=%d/%d %s%s%s\n",
                u->id, u->team, u->owner_peer, u->x, u->y, u->hp, u->hp_max,
-               u->alive ? "vivant" : "mort", u->dirty ? " DIRTY" : "");
+               u->alive ? "vivant" : "mort", u->dirty ? " DIRTY" : "", origin);
     }
 }
 
@@ -39,11 +40,13 @@ int main(int argc, char *argv[])
         s.magic = PROTOCOL_MAGIC;
         s.version = PROTOCOL_VERSION;
         s.my_peer_id = (uint8_t)peer_id;
-        s.unit_count = 2;
+        s.unit_count = 3;
         s.units[0] = (UnitState){.id=0, .team=peer_id, .owner_peer=peer_id,
                                  .alive=1, .dirty=1, .x=5, .y=3, .hp=100, .hp_max=100};
         s.units[1] = (UnitState){.id=1, .team=peer_id, .owner_peer=peer_id,
                                  .alive=1, .dirty=1, .x=7, .y=2, .hp=60, .hp_max=60};
+        s.units[2] = (UnitState){.id=2, .team=peer_id, .owner_peer=peer_id,
+                                 .alive=1, .dirty=1, .x=9, .y=4, .hp=80, .hp_max=80};
         ipc_write_state(&s);
         printf("Ecrit %d unites dans la SHM.\n", s.unit_count);
     }

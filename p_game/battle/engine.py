@@ -114,21 +114,35 @@ class Engine:
     def initialize_units(self):
         """charge la liste d'unite"""
         uid = 0
-        for (x, y) in self.game_map.map:
-            u = self.game_map.get_unit(x, y)
+        hidden_remote_units = []
+        for (x, y), u in list(self.game_map.map.items()):
             u.unit_id = uid
             uid += 1
             u.direction = (0, 0)
-            # Définition du propriétaire réseau local
+            # V1: pas de propriété réseau cessible. On garde seulement l'équipe
+            # qui pilote l'unité pour savoir ce que ce processus a le droit de jouer.
             if self.is_distributed:
                 u.is_local = (self.local_team is not None and u.team == self.local_team)
-                u.network_owner = self.local_team if u.is_local else (('R' if u.team == 'R' else 'B') if self.local_team is not None else None)
+                u.network_owner = None
+                u.v1_remote_seen = u.is_local or self.local_team is None
+                if self.local_team is not None and not u.is_local:
+                    hidden_remote_units.append(u)
             else:
                 u.is_local = True
                 u.network_owner = u.team
+                u.v1_remote_seen = True
             # 0=R, 1=B
             u.owner_id = 0 if u.team == 'R' else 1
             self.units.append(u)
+
+        for unit in hidden_remote_units:
+            self.game_map.remove_unit_instance(unit)
+
+        if hidden_remote_units:
+            print(
+                f"[V1] {len(hidden_remote_units)} unités distantes masquées au départ; "
+                "elles apparaîtront à la réception des états réseau."
+            )
 
     def all_units(self):
         return self.units
@@ -199,11 +213,11 @@ class Engine:
         try:
             # Initialisation
             self.load_scenario()
+            self.initialize_units()
             self.initialize_ai()
 
             if self.view_type > 0:
                 self.initialize_view()
-            self.initialize_units()
 
             self.is_running = True
             self.star_execution_time = time.time()
@@ -419,36 +433,12 @@ class Engine:
         network_bridge.exchange_state(self)
 
     def request_network_ownership(self, unit):
-        """Stub préparatoire pour la V2. La V1 n'a pas de vrai transfert de propriété."""
-        if not self.is_distributed:
-            return False
-        try:
-            import network_bridge
-            if hasattr(network_bridge, 'request_ownership'):
-                return bool(network_bridge.request_ownership(unit))
-        except Exception:
-            pass
-        # Fallback local (optimiste)
-        if unit.team == self.local_team:
-            unit.is_local = True
-            unit.network_owner = self.local_team
-            return True
+        """V1 stricte: aucun transfert de propriété réseau."""
         return False
 
     def cede_network_ownership(self, unit, new_owner_team=None):
-        """Stub préparatoire pour la V2. La V1 n'a pas de vrai transfert de propriété."""
-        if not self.is_distributed:
-            return False
-        try:
-            import network_bridge
-            if hasattr(network_bridge, 'cede_ownership'):
-                return bool(network_bridge.cede_ownership(unit, new_owner_team))
-        except Exception:
-            pass
-        # Fallback local
-        unit.is_local = (unit.team == self.local_team and self.local_team is not None)
-        unit.network_owner = self.local_team if unit.is_local else new_owner_team
-        return True
+        """V1 stricte: aucune cession de propriété réseau."""
+        return False
 
     def change_view(self, view_type):
         """Change la vue du jeu (terminal ou GUI)"""
@@ -521,15 +511,16 @@ class Engine:
     def get_game_info(self):
         """Retourne les informations de jeu à afficher"""
 
+        visible_units = [u for u in self.game_map.map.values() if u is not None]
         return {
             'turn': self.current_turn,
             'ia1': self.ia1.name,
             'ia2': self.ia2.name,
             'game_pause': self.game_pause,
-            'units_ia1': len([u for u in self.units if u.team == 'R' and u.is_alive]),
+            'units_ia1': len([u for u in visible_units if u.team == 'R' and u.is_alive]),
             #'units_ia1_hp': sum(u.current_hp for u in self.units if u.team == 'R' and u.is_alive),
 
-            'units_ia2': len([u for u in self.units if u.team == 'B' and u.is_alive]),
+            'units_ia2': len([u for u in visible_units if u.team == 'B' and u.is_alive]),
             #'units_ia2_hp': sum(u.current_hp for u in self.units if u.team == 'B' and u.is_alive),
             'target_tps' : self.tps,
             'real_tps': mean(self.tab_tps_affichage) if self.tab_tps_affichage else 0,
@@ -649,8 +640,9 @@ class Engine:
 
         teams_data = {}
         teams = {'R': 'Rouge', 'B': 'Bleue'}
+        visible_units = [u for u in self.game_map.map.values() if u is not None]
         for team_code, team_name in teams.items():
-            team_units = [u for u in self.units if u.team == team_code]
+            team_units = [u for u in visible_units if u.team == team_code]
             alive_units = [u for u in team_units if u.is_alive]
 
             total_hp = sum(u.current_hp for u in alive_units)
@@ -686,7 +678,7 @@ class Engine:
             }
 
         units_list = []
-        for u in self.units:
+        for u in visible_units:
             units_list.append({
                 'team_code': u.team,
                 'type': u.type,

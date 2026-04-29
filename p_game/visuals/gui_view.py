@@ -527,10 +527,7 @@ class GUI_view:
 
     def display(self, map: Map, battle_infos: dict):
         """ Return True si il faut continuer a afficher et False si il faut quitter le gui"""
-        if self.all_units is None:
-            self.all_units = []
-            for (x, y) in map.map:
-                self.all_units.append(map.get_unit(x, y))
+        self.all_units = [unit for unit in map.map.values() if unit is not None]
 
         self.screen.fill((0,0,0))
         

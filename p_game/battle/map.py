@@ -125,7 +125,7 @@ class Map:
                         continue
                     pos = (float(line[0]), float(line[1]))
                     self.map[pos].current_hp = float(line[2])
-                    self.map[pos].is_alive = bool(line[4])
+                    self.map[pos].is_alive = line[4].lower() == "true"
                     self.map[pos].state = line[5]
                     self.map[pos].time_until_next_attack = float(line[6])
 

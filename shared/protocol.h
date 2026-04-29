@@ -35,9 +35,6 @@ typedef struct {
 
 typedef enum {
     MSG_STATE_UPDATE = 1,
-    MSG_OWN_REQUEST  = 2,
-    MSG_OWN_GRANT    = 3,
-    MSG_OWN_DENY     = 4,
 } MsgType;
 
 typedef struct {
