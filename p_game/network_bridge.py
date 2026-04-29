@@ -250,6 +250,8 @@ def exchange_state(engine) -> None:
                 unit.is_alive = (slot.alive != 0)
                 if not unit.is_alive:
                     unit.state = "dead"
+                if hasattr(engine, "on_network_ownership_acquired"):
+                    engine.on_network_ownership_acquired(unit)
 
             if slot.hp < unit.current_hp and slot.hp >= 0:
                 unit.current_hp = slot.hp

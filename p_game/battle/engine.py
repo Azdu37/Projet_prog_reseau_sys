@@ -92,6 +92,7 @@ class Engine:
         self.ia_thinking_time = {'R': 0.0, 'B': 0.0}
         self.initial_units_count = {'R': 0, 'B': 0}
         self.history = {'turns': [], 'red_units': [], 'blue_units': []}
+        self.pending_network_actions = {}
 
         # Vue
         self.view_type = view_type
@@ -144,6 +145,7 @@ class Engine:
 
         print(f"Loading scenario: {self.scenario_name}")
         self.game_map = Map()
+        self.game_map.engine = self
         Map.load(self.game_map, self.scenario_name)
 
 
@@ -474,6 +476,69 @@ class Engine:
             unit.network_owner = self.local_team
             return True
         return False
+
+    def queue_network_attack(self, attacker, target):
+        """Met en attente une attaque jusqu'a reception de la propriete reseau de la cible."""
+        if not self.is_distributed:
+            return False
+        attacker_id = getattr(attacker, "unit_id", None)
+        target_id = getattr(target, "unit_id", None)
+        if attacker_id is None or target_id is None:
+            return False
+        if target_id in self.pending_network_actions:
+            return True
+
+        self.pending_network_actions[target_id] = {
+            "type": "attack",
+            "attacker_id": attacker_id,
+            "target_id": target_id,
+        }
+        print(
+            f"[DEMO-REQ] Attaque en attente: unit #{attacker_id} demande "
+            f"propriete cible #{target_id}"
+        )
+        return self.request_network_ownership(target)
+
+    def on_network_ownership_acquired(self, unit):
+        """Rejoue l'action en attente apres acquisition et verification de l'etat coherent."""
+        action = self.pending_network_actions.pop(getattr(unit, "unit_id", None), None)
+        if not action or action.get("type") != "attack":
+            return False
+
+        attacker = self.find_unit(action.get("attacker_id"))
+        target = self.find_unit(action.get("target_id"))
+
+        reason = None
+        if attacker is None:
+            reason = "attaquant introuvable"
+        elif target is None:
+            reason = "cible introuvable"
+        elif not attacker.is_alive:
+            reason = "attaquant mort"
+        elif not target.is_alive:
+            reason = "cible deja morte"
+        elif not getattr(attacker, "is_local", True):
+            reason = "attaquant non local"
+        elif not getattr(target, "is_local", False):
+            reason = "propriete cible non acquise"
+        elif not attacker.can_attack(target):
+            reason = "cible hors portee ou cooldown"
+
+        if reason:
+            print(f"[DEMO-CHECK] Action annulee cible #{action.get('target_id')}: {reason}")
+            return False
+
+        print(
+            f"[DEMO-CHECK] Verification action cible #{target.unit_id}: OK "
+            f"(vivante, en portee, propriete acquise)"
+        )
+        before_hp = target.current_hp
+        self.game_map.apply_verified_attack(attacker, target)
+        print(
+            f"[DEMO-ACTION] Degats appliques apres propriete: cible #{target.unit_id} "
+            f"HP {before_hp}->{target.current_hp}"
+        )
+        return True
 
     def cede_network_ownership(self, unit, new_owner_team=None):
         """Cède la propriété réseau d'une unité."""

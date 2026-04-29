@@ -156,7 +156,7 @@ bash scripts/test_network.sh
 ### Lancement réseau (2 joueurs)
 
 ```bash
-# À venir — via scripts/launch.sh
+bash scripts/launch.sh IP COULEUR IA
 ```
 
 ---
