@@ -311,7 +311,6 @@ class GUI_view:
         """Affiche le nombre de zombies en bas de l'écran."""
         self.detect_zombies(engine)
         zombie_count = getattr(engine, 'zombie_count', 0) if engine else 0
-        zombie_events = getattr(engine, 'zombie_events', []) if engine else []
 
         if self._zombie_blink_timer > 0 and fps > 0:
             self._zombie_blink_timer -= 1.0 / fps
@@ -333,22 +332,6 @@ class GUI_view:
         color = (255, 120, 40) if zombie_count > 0 else (130, 220, 130)
         text = self.zombie_font.render(label, True, color)
         self.screen.blit(text, (0, bar_y + (bar_height - text.get_height()) // 2))
-
-        recent = zombie_events[-3:]
-        if recent:
-            parts = []
-            for event in recent:
-                if isinstance(event, dict):
-                    parts.append(
-                        f"T{event.get('turn')} #{event.get('unit_id')}"
-                        f"({event.get('team')}) {event.get('source')}"
-                    )
-                else:
-                    parts.append(str(event))
-            hist = " | ".join(parts)
-            hist_surf = self.zombie_font.render(hist, True, (255, 210, 120))
-            x_hist = max(text.get_width() + 16, self.max_size[0] - hist_surf.get_width() - 8)
-            self.screen.blit(hist_surf, (x_hist, bar_y + (bar_height - hist_surf.get_height()) // 2))
 
     def display_units(self, map : Map, fps, all_units_raw, engine=None):
         """ Affichage unités """
