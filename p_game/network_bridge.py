@@ -166,9 +166,8 @@ def _exp_log(message: str) -> None:
 
 
 def _exp_pause(reason: str) -> None:
-    if _experiment_enabled and _experiment_delay > 0:
-        _exp_log(f"Pause : {reason} ({_experiment_delay:.2f}s)")
-        time.sleep(_experiment_delay)
+    if _experiment_enabled:
+        _exp_log(f"Pause ignorée : {reason} (delay configuré={_experiment_delay:.2f}s)")
 
 
 def init(player_id: int) -> None:

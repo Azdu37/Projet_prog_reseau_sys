@@ -42,9 +42,9 @@ class BattleCLI:
         run_parser.add_argument("--peer", help="Paramètre pair/endpoint réseau")
         run_parser.add_argument("--p2p-port", type=int, default=5555, help="Port P2P local")
         run_parser.add_argument("--network-experiment", action="store_true",
-                                help="Active un mode de démonstration réseau avec ralentissement et logs détaillés")
+                                help="Active les logs détaillés du mode expérimental réseau, sans ralentissement")
         run_parser.add_argument("--network-step-delay", type=float, default=1.0,
-                                help="Délai en secondes entre deux étapes visibles du mode expérimental")
+                                help="Paramètre conservé pour compatibilité; n'introduit plus de ralentissement")
 
         # Commande: load
         load_parser = self.subparsers.add_parser("load", help="Charger une sauvegarde")
@@ -93,9 +93,8 @@ class BattleCLI:
         if args.distributed:
             if args.network_experiment:
                 os.environ["NET_EXPERIMENT"] = "1"
-                os.environ["NET_EXPERIMENT_DELAY_MS"] = str(max(50, int(args.network_step_delay * 1000)))
                 os.environ["NET_EXPERIMENT_STEP_DELAY"] = str(args.network_step_delay)
-                print(f"[NETWORK-EXPERIMENT] Mode expérimental actif (delay={args.network_step_delay:.2f}s)")
+                print(f"[NETWORK-EXPERIMENT] Mode expérimental actif (logs détaillés, sans ralentissement; delay configuré={args.network_step_delay:.2f}s)")
             # 0=ROUGE, 1=BLEU (comme pour le programme C)
             player_id = 0 if args.local_team == 'R' else (1 if args.local_team == 'B' else 0)
             

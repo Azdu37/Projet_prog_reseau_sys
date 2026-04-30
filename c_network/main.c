@@ -94,14 +94,8 @@ int main(int argc, char *argv[])
     char *experiment_env = getenv("NET_EXPERIMENT");
     if (experiment_env && strcmp(experiment_env, "1") == 0) {
         g_experiment_mode = 1;
-        char *delay_env = getenv("NET_EXPERIMENT_DELAY_MS");
-        if (delay_env) {
-            int delay_ms = atoi(delay_env);
-            if (delay_ms > 0) {
-                g_loop_sleep_us = (useconds_t)delay_ms * 1000u;
-            }
-        }
-        printf("[NET-EXP][C] Mode expérimental actif (sleep=%u us)\n", (unsigned)g_loop_sleep_us);
+        printf("[NET-EXP][C] Mode expérimental actif (logs détaillés, sans ralentissement; sleep=%u us)\n",
+               (unsigned)g_loop_sleep_us);
     }
 
     /* ── Port ───────────────────────────────────────────────────────────────── */

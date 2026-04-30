@@ -115,22 +115,17 @@ class Engine:
         self.units = []
 
         if self.network_experiment:
-            self.tps = 1
-            self.max_fps = 5
-            self.min_fps = 1
-            self.min_frame_delay = 1 / self.max_fps
-            self.max_frame_delay = 1 / self.min_fps
-            self.turn_time_target = 1.0 / self.tps
-            print(f"[NET-EXP] Mode expérimental réseau actif : tps={self.tps}, delay={self.network_step_delay:.2f}s")
+            print(f"[NET-EXP] Mode expérimental réseau actif : logs détaillés, sans ralentissement (delay configuré={self.network_step_delay:.2f}s)")
 
     def log_network_experiment(self, message):
         if self.network_experiment:
             print(f"[NET-EXP][TURN {self.current_turn:05d}] {message}", flush=True)
 
     def pause_network_experiment(self, reason):
-        if self.network_experiment and self.network_step_delay > 0:
-            self.log_network_experiment(f"Pause démonstration : {reason} ({self.network_step_delay:.2f}s)")
-            time.sleep(self.network_step_delay)
+        if self.network_experiment:
+            self.log_network_experiment(
+                f"Pause démonstration ignorée : {reason} (delay configuré={self.network_step_delay:.2f}s)"
+            )
 
     def initialize_units(self):
         """charge la liste d'unite"""
