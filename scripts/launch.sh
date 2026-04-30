@@ -26,6 +26,8 @@ REMOTE_IP="$1"
 COULEUR=$(echo "$2" | tr '[:lower:]' '[:upper:]')
 MON_IA="$(echo "$3" | tr '[:upper:]' '[:lower:]')"
 SCENARIO="${4:-stest7}"
+EXPERIMENT_NETWORK="${EXPERIMENT_NETWORK:-0}"
+EXPERIMENT_DELAY="${EXPERIMENT_DELAY:-1.0}"
 
 # ── Étape 0 : Vérification IA ──────────────────────────────────────────────
 cd "$(dirname "$0")/../p_game"
@@ -63,6 +65,7 @@ echo "║  🎯 ÉQUIPE   : $COULEUR"
 echo "║  🤖 IA       : $MON_IA"
 echo "║  📡 ADVERSAIRE: $REMOTE_IP"
 echo "║  🗺️  SCENARIO : $SCENARIO"
+echo "║  🧪 MODE DEMO : $EXPERIMENT_NETWORK (delay=${EXPERIMENT_DELAY}s)"
 echo "║                                                             ║"
 echo "║  ⚠️  L'autre joueur doit choisir l'Équipe $COULEUR_ADVERSE !  ║"
 echo "╚═════════════════════════════════════════════════════════════╝"
@@ -79,7 +82,13 @@ echo "  ✓ C compilé."
 # ── Étape 2 : Lancement du processus C (SHM + UDP) ─────────────────────────
 echo ""
 echo "▶ [2/3] Lancement du routeur C (port 9000 UDP)..."
-./c_net "$PEER_ID" "$REMOTE_IP" &
+if [ "$EXPERIMENT_NETWORK" = "1" ]; then
+    NET_EXPERIMENT=1 NET_EXPERIMENT_STEP_DELAY="$EXPERIMENT_DELAY" \
+    NET_EXPERIMENT_DELAY_MS="$(python3 -c "print(max(50, int(float('$EXPERIMENT_DELAY') * 1000)))")" \
+    ./c_net "$PEER_ID" "$REMOTE_IP" &
+else
+    ./c_net "$PEER_ID" "$REMOTE_IP" &
+fi
 C_PID=$!
 echo "  ✓ Processus C lancé (PID=$C_PID)."
 
@@ -98,8 +107,16 @@ echo "▶ [3/3] Lancement du jeu Python..."
 echo ""
 
 cd "$ROOT/p_game"
-python3 main.py run "$SCENARIO" "$IA_ROUGE" "$IA_BLEUE" \
-    --distributed --local-team "$LOCAL_TEAM"
+if [ "$EXPERIMENT_NETWORK" = "1" ]; then
+    NET_EXPERIMENT=1 NET_EXPERIMENT_STEP_DELAY="$EXPERIMENT_DELAY" \
+    NET_EXPERIMENT_DELAY_MS="$(python3 -c "print(max(50, int(float('$EXPERIMENT_DELAY') * 1000)))")" \
+    python3 main.py run "$SCENARIO" "$IA_ROUGE" "$IA_BLEUE" \
+        --distributed --local-team "$LOCAL_TEAM" \
+        --network-experiment --network-step-delay "$EXPERIMENT_DELAY"
+else
+    python3 main.py run "$SCENARIO" "$IA_ROUGE" "$IA_BLEUE" \
+        --distributed --local-team "$LOCAL_TEAM"
+fi
 
 # ── Nettoyage ────────────────────────────────────────────────────────────────
 echo ""

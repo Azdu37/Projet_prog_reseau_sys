@@ -65,11 +65,14 @@ def randomize_order(units):
 
 
 class Engine:
-    def __init__(self, scenario, ia1, ia2, view_type, is_distributed=False, local_team=None):
+    def __init__(self, scenario, ia1, ia2, view_type, is_distributed=False, local_team=None,
+                 network_experiment=False, network_step_delay=1.0):
 
         self.scenario_name = scenario
         self.is_distributed = is_distributed
         self.local_team = local_team
+        self.network_experiment = bool(network_experiment)
+        self.network_step_delay = max(0.0, float(network_step_delay))
         self.observer_mode = bool(is_distributed and (local_team is None))
         self.ia1_name = fix_string(ia1)
         self.ia2_name = fix_string(ia2)
@@ -110,6 +113,24 @@ class Engine:
         self.turn_fps = 0
         self.time_turn = 0
         self.units = []
+
+        if self.network_experiment:
+            self.tps = 1
+            self.max_fps = 5
+            self.min_fps = 1
+            self.min_frame_delay = 1 / self.max_fps
+            self.max_frame_delay = 1 / self.min_fps
+            self.turn_time_target = 1.0 / self.tps
+            print(f"[NET-EXP] Mode expérimental réseau actif : tps={self.tps}, delay={self.network_step_delay:.2f}s")
+
+    def log_network_experiment(self, message):
+        if self.network_experiment:
+            print(f"[NET-EXP][TURN {self.current_turn:05d}] {message}", flush=True)
+
+    def pause_network_experiment(self, reason):
+        if self.network_experiment and self.network_step_delay > 0:
+            self.log_network_experiment(f"Pause démonstration : {reason} ({self.network_step_delay:.2f}s)")
+            time.sleep(self.network_step_delay)
 
     def initialize_units(self):
         """charge la liste d'unite"""
@@ -228,6 +249,9 @@ class Engine:
             if self.view_type > 0:
                 self.initialize_view()
             self.initialize_units()
+
+            if self.network_experiment:
+                self.log_network_experiment("Scène initialisée, attente d'événements réseau détaillés")
 
             # ── En mode réparti : attendre que les deux PC soient prêts ──────
             if self.is_distributed:
@@ -426,6 +450,9 @@ class Engine:
                 if not self.is_distributed or self.local_team == 'R':
                     # V2: Demander la propriété si on ne l'a pas encore
                     if self.is_distributed and not getattr(unit, 'is_local', True):
+                        self.log_network_experiment(
+                            f"Unité {unit.unit_id} équipe {unit.team} non locale : demande de propriété avant action"
+                        )
                         self.request_network_ownership(unit)
                     else:
                         self.ia1.play_turn(unit, self.current_turn)
@@ -434,6 +461,9 @@ class Engine:
                 if not self.is_distributed or self.local_team == 'B':
                     # V2: Demander la propriété si on ne l'a pas encore
                     if self.is_distributed and not getattr(unit, 'is_local', True):
+                        self.log_network_experiment(
+                            f"Unité {unit.unit_id} équipe {unit.team} non locale : demande de propriété avant action"
+                        )
                         self.request_network_ownership(unit)
                     else:
                         self.ia2.play_turn(unit, self.current_turn)
@@ -453,6 +483,8 @@ class Engine:
     def network_exchange(self):
         """Échange réseau : envoie notre état + reçoit l'état distant via SHM/C/UDP."""
         import network_bridge
+        if self.network_experiment:
+            self.log_network_experiment("Exchange SHM : lecture des mises à jour distantes puis publication locale")
         network_bridge.exchange_state(self)
 
     def request_network_ownership(self, unit):
@@ -462,7 +494,13 @@ class Engine:
         try:
             import network_bridge
             if hasattr(network_bridge, 'request_ownership'):
-                return bool(network_bridge.request_ownership(unit))
+                ok = bool(network_bridge.request_ownership(unit))
+                if ok:
+                    self.log_network_experiment(
+                        f"Requête de propriété posée pour unité {unit.unit_id} (owner actuel={getattr(unit, 'owner_id', '?')})"
+                    )
+                    self.pause_network_experiment(f"après requête de propriété unité {unit.unit_id}")
+                return ok
         except Exception:
             pass
         # Fallback local (optimiste)

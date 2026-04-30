@@ -156,6 +156,19 @@ class POSIXBridge:
 
 # ── INSTANCE GLOBALE ──────────────────────────────────────────────────────────
 _bridge = None
+_experiment_enabled = os.getenv("NET_EXPERIMENT", "0") == "1"
+_experiment_delay = max(0.0, float(os.getenv("NET_EXPERIMENT_STEP_DELAY", "0") or "0"))
+
+
+def _exp_log(message: str) -> None:
+    if _experiment_enabled:
+        print(f"[NET-EXP][bridge] {message}", flush=True)
+
+
+def _exp_pause(reason: str) -> None:
+    if _experiment_enabled and _experiment_delay > 0:
+        _exp_log(f"Pause : {reason} ({_experiment_delay:.2f}s)")
+        time.sleep(_experiment_delay)
 
 
 def init(player_id: int) -> None:
@@ -203,6 +216,7 @@ def request_ownership(unit) -> bool:
     if not _bridge:
         return False
     unit.pending_ownership_request = True
+    _exp_log(f"Demande de propriété préparée pour unité {unit.unit_id}")
     return True
 
 
@@ -258,11 +272,13 @@ def exchange_state(engine) -> None:
             unit._network_synced = True
             if old_owner != my_peer:
                 print(f"[bridge] Propriété ACQUISE pour unité {uid}")
+                _exp_log(f"Point 2/3 : unité {uid} reçue avec état x={slot.x:.1f} y={slot.y:.1f} hp={slot.hp}")
                 unit.position = (slot.x, slot.y)
                 unit.current_hp = slot.hp
                 unit.is_alive = (slot.alive != 0)
                 if not unit.is_alive:
                     unit.state = "dead"
+                _exp_pause(f"après acquisition de propriété unité {uid}")
 
             if slot.hp < unit.current_hp and slot.hp >= 0:
                 unit.current_hp = slot.hp
@@ -275,6 +291,7 @@ def exchange_state(engine) -> None:
         else:
             if old_owner == my_peer:
                 print(f"[bridge] Propriété PERDUE pour unité {uid}")
+                _exp_log(f"Unité {uid} redevient distante, suivi en lecture seule")
 
             unit.position = (slot.x, slot.y)
 
@@ -315,6 +332,7 @@ def exchange_state(engine) -> None:
             if not unit.is_local:
                 slot.id    = uid
                 slot.dirty = 2
+                _exp_log(f"Point 1 : unité {uid} marquée dirty=2 pour émission de MSG_OWN_REQUEST")
                 continue
 
         owner = unit.owner_id
@@ -332,6 +350,9 @@ def exchange_state(engine) -> None:
             slot._pad[1]    = int(getattr(unit, '_network_projectile_target_id', 255)) & 0xFF
             slot._pad[2]    = 0
             slot.dirty      = 1
+            _exp_log(
+                f"Point 5 : publication locale unité {uid} owner={owner} pos=({slot.x:.1f},{slot.y:.1f}) hp={slot.hp}"
+            )
         else:
             if slot.hp_max == 0:
                 slot.id         = uid

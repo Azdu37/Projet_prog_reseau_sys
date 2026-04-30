@@ -18,11 +18,22 @@
 #include "network.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 /* ── État interne du handshake ─────────────────────────────────────────────── */
 static int g_handshake_done   = 0;
 static int g_peers_said_hello = 0;   /* bitmask des pairs dont on a reçu HELLO */
 static int g_expected_peers   = 1;   /* nombre de pairs attendus (mis à jour par main) */
+static int g_experiment_mode  = -1;
+
+static int experiment_mode(void)
+{
+    if (g_experiment_mode < 0) {
+        const char *env = getenv("NET_EXPERIMENT");
+        g_experiment_mode = (env && strcmp(env, "1") == 0) ? 1 : 0;
+    }
+    return g_experiment_mode;
+}
 
 /* ── API publique ───────────────────────────────────────────────────────────── */
 
@@ -159,6 +170,10 @@ void proto_handle_incoming(const NetMessage *msg, GameState *local_state)
                 memcpy(local_unit->_pad, msg->unit._pad, sizeof(local_unit->_pad));
             }
         } else {
+            if (experiment_mode()) {
+                printf("[NET-EXP][proto] Point 6 : application distante unite %d owner=%d pos=(%.1f,%.1f) hp=%u\n",
+                       uid, msg->unit.owner_peer, msg->unit.x, msg->unit.y, msg->unit.hp);
+            }
             local_unit->id         = msg->unit.id;
             local_unit->team       = msg->unit.team;
             local_unit->owner_peer = msg->unit.owner_peer;
@@ -183,6 +198,10 @@ void proto_handle_incoming(const NetMessage *msg, GameState *local_state)
 
         if (local_unit->owner_peer == local_state->my_peer_id) {
             printf("[proto] Cede propriete unite %d a peer %d\n", uid, msg->sender_id);
+            if (experiment_mode()) {
+                printf("[NET-EXP][proto] Point 2 : transfert unite %d avec etat pos=(%.1f,%.1f) hp=%u vers peer %d\n",
+                       uid, local_unit->x, local_unit->y, local_unit->hp, msg->sender_id);
+            }
             local_unit->owner_peer = msg->sender_id;
             local_unit->dirty      = 0;
 
@@ -206,6 +225,9 @@ void proto_handle_incoming(const NetMessage *msg, GameState *local_state)
 
         UnitState *local_unit = &local_state->units[uid];
         printf("[proto] Recu propriete unite %d de peer %d\n", uid, msg->sender_id);
+        if (experiment_mode()) {
+            printf("[NET-EXP][proto] Point 3 : reception de propriete unite %d, controle local reactive\n", uid);
+        }
         memcpy(local_unit, &msg->unit, sizeof(UnitState));
         local_unit->owner_peer = local_state->my_peer_id;
         local_unit->dirty      = 1;

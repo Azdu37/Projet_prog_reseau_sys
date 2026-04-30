@@ -29,6 +29,15 @@
 
 /* ── Gestion SIGINT ─────────────────────────────────────────────────────────── */
 static volatile int g_running = 1;
+static int g_experiment_mode = 0;
+static useconds_t g_loop_sleep_us = 16000;
+
+static void exp_log(const char *message)
+{
+    if (g_experiment_mode) {
+        printf("[NET-EXP][C] %s\n", message);
+    }
+}
 
 static void handle_sigint(int sig)
 {
@@ -44,11 +53,18 @@ static void broadcast_dirty_units(GameState *state)
         UnitState *u = &state->units[i];
 
         if (u->dirty == 1) {
+            if (g_experiment_mode) {
+                printf("[NET-EXP][C] Point 5 : diffusion etat unite %d owner=%d pos=(%.1f,%.1f) hp=%u\n",
+                       u->id, u->owner_peer, u->x, u->y, u->hp);
+            }
             net_broadcast_state_update(u, state->my_peer_id);
             u->dirty = 0;
         }
         else if (u->dirty == 2) {
             printf("[main] Envoi requete propriete pour unite %d\n", u->id);
+            if (g_experiment_mode) {
+                printf("[NET-EXP][C] Point 1 : emission MSG_OWN_REQUEST pour unite %d vers les pairs\n", u->id);
+            }
             NetMessage msg;
             memset(&msg, 0, sizeof(msg));
             msg.magic     = PROTOCOL_MAGIC;
@@ -74,6 +90,19 @@ int main(int argc, char *argv[])
 
     uint8_t my_peer_id = (uint8_t)atoi(argv[1]);
     printf("[main] Demarrage — peer_id=%d\n", my_peer_id);
+
+    char *experiment_env = getenv("NET_EXPERIMENT");
+    if (experiment_env && strcmp(experiment_env, "1") == 0) {
+        g_experiment_mode = 1;
+        char *delay_env = getenv("NET_EXPERIMENT_DELAY_MS");
+        if (delay_env) {
+            int delay_ms = atoi(delay_env);
+            if (delay_ms > 0) {
+                g_loop_sleep_us = (useconds_t)delay_ms * 1000u;
+            }
+        }
+        printf("[NET-EXP][C] Mode expérimental actif (sleep=%u us)\n", (unsigned)g_loop_sleep_us);
+    }
 
     /* ── Port ───────────────────────────────────────────────────────────────── */
     uint16_t port = NET_PORT;
@@ -156,6 +185,7 @@ int main(int argc, char *argv[])
      * On attend que tous les pairs soient prêts avant de lancer le jeu.
      * ════════════════════════════════════════════════════════════════════════ */
     printf("[main] === Phase HANDSHAKE : attente des %d pair(s)... ===\n", nb_pairs);
+    exp_log("Démonstration réseau : attente de la fin du handshake avant échanges de jeu");
 
     GameState local_state;
     NetMessage incoming;
@@ -182,7 +212,7 @@ int main(int argc, char *argv[])
                 fprintf(stderr, "[main] Erreur ecriture SHM pendant attente Python\n");
                 break;
             }
-            usleep(16000);
+            usleep(g_loop_sleep_us);
             continue;
         }
 
@@ -211,7 +241,7 @@ int main(int argc, char *argv[])
         /* Écrit l'état dans la SHM pour que Python voie both_ready */
         ipc_write_state(&local_state);
 
-        usleep(16000);   /* ~60 Hz */
+        usleep(g_loop_sleep_us);
     }
 
     if (!proto_handshake_done()) {
@@ -231,6 +261,7 @@ int main(int argc, char *argv[])
      * PHASE 2 — BOUCLE DE JEU (60 Hz)
      * ════════════════════════════════════════════════════════════════════════ */
     printf("[main] === Boucle de jeu demarree (Ctrl+C pour arreter) ===\n");
+    exp_log("Boucle réseau ralentie pour visualiser chaque requête et propagation");
 
     while (g_running) {
 
@@ -263,7 +294,7 @@ int main(int argc, char *argv[])
             break;
         }
 
-        usleep(16000);
+        usleep(g_loop_sleep_us);
     }
 
     printf("[main] Fermeture propre\n");
